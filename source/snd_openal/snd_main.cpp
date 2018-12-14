@@ -44,7 +44,7 @@ cvar_t *s_effects_number_threshold;
 cvar_t *s_hrtf;
 cvar_t *s_realistic_obstruction;
 cvar_t *s_stereo2mono;
-cvar_t *s_globalfocus;
+static cvar_t *s_globalfocus;
 
 static int s_registration_sequence = 1;
 static bool s_registering;

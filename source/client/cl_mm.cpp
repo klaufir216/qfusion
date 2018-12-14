@@ -96,8 +96,6 @@ mempool_t *cl_mm_mempool = 0;
 #define MM_Alloc( n ) Mem_Alloc( cl_mm_mempool, ( n ) )
 #define MM_Free( data ) Mem_Free( data )
 
-static stat_query_api_t *sq_api = NULL;
-
 /*
 * public vars
 */
@@ -232,60 +230,39 @@ static void CL_MM_Login_f( void ) {
 
 //===============================================
 
-static void cl_mm_heartbeat_done( stat_query_t *query, bool success, void *customp ) {
-}
-
 void CL_MM_Heartbeat( void ) {
-	stat_query_t *query;
-
 	if( !cl_mm_enabled || !Uuid_IsValidSessionId( cls.mm_session ) ) {
 		return;
 	}
 
 	// push a request
-	query = sq_api->CreateQuery( NULL, "client/heartbeat", false );
-	if( query == NULL ) {
+	QueryObject *query = QueryObject::NewPostQuery( "client/heartbeat" );
+	if( !query ) {
 		return;
 	}
 
-	// servers own session (TODO: put this to a cookie or smth)
-	char buffer[UUID_BUFFER_SIZE];
-	sq_api->SetField( query, MM_FORM_CLIENT_SESSION, Uuid_ToString( buffer, cls.mm_session ) );
-
-	// redundant atm
-	sq_api->SetCallback( query, cl_mm_heartbeat_done, NULL );
-	sq_api->Send( query );
+	query->SetServerSession( cls.mm_session );
+	query->SendDeletingOnCompletion( []( QueryObject * ) {} );
 }
 
-void cl_mm_connect_done( stat_query_t *query, bool success, void *customp ) {
-	stat_query_section_t *root;
-	char uuid_buffer[UUID_BUFFER_SIZE];
+static void CL_MM_ClientConnectDone( QueryObject *query ) {
+	Com_DPrintf( "CL_MM_Connect: %s\n", query->RawResponse() );
 
-	Com_DPrintf( "CL_MM_Connect: %s\n", sq_api->GetRawResponse( query ) );
-
-	/*
-	 * ch : JSON API
-	 * {
-	 * 		status: int // 0 on failure
-	 *		ticket: [uuid] // present if status is success
-	 * }
-	 */
-
-	if( !success ) {
-		CL_MM_ErrorMessage( true, "MM Connect: StatQuery error" );
+	if( !query->HasSucceeded() ) {
+		CL_MM_ErrorMessage( true, "MM Connect: request error" );
+	} else if( !query->ResponseJsonRoot() ) {
+		CL_MM_ErrorMessage( true, "MM Connect: failed to parse data" );
 	} else {
-		root = sq_api->GetRoot( query );
-		if( root != NULL ) {
-			const char *ticketString = sq_api->GetString( root, "ticket" );
-			if( !Uuid_FromString( ticketString, &cls.mm_ticket ) ) {
-				CL_MM_ErrorMessage( true, "MM Connect: illegal ticket string %s\n", ticketString );
-			}
+		const char *ticketString = query->GetRootString( "ticket", "" );
+		if( !Uuid_FromString( ticketString, &cls.mm_ticket ) ) {
+			CL_MM_ErrorMessage( true, "MM Connect: malformed ticket string %s\n", ticketString );
 		}
 	}
 
 	CL_SetClientState( CA_CONNECTING );
 
-	Com_DPrintf( "CL_MM_Connect: Using ticket %s\n", Uuid_ToString( uuid_buffer, cls.mm_ticket ) );
+	char buffer[UUID_BUFFER_SIZE];
+	Com_DPrintf( "CL_MM_Connect: Using ticket %s\n", Uuid_ToString( buffer, cls.mm_ticket ) );
 }
 
 bool CL_MM_Connect( const netadr_t *address ) {
@@ -294,9 +271,6 @@ bool CL_MM_Connect( const netadr_t *address ) {
 	* upon response we can set the client state to CA_CONNECTING
 	* and actually connect to the gameserver
 	*/
-	stat_query_t *query;
-	char buffer[UUID_BUFFER_SIZE];
-
 	// Com_Printf("CL_MM_Connect %s\n", NET_AddressToString( address ) );
 
 	cls.mm_ticket = Uuid_ZeroUuid();
@@ -306,18 +280,14 @@ bool CL_MM_Connect( const netadr_t *address ) {
 		return false;
 	}
 
-	// TODO: validate the parameters
-	query = sq_api->CreateQuery( NULL, "client/connect", false );
-	if( query == NULL ) {
+	QueryObject *query = QueryObject::NewPostQuery( "client/connect" );
+	if( !query ) {
 		return false;
 	}
 
-	// TODO: put the session in a cookie
-	sq_api->SetField( query, MM_FORM_CLIENT_SESSION, Uuid_ToString( buffer, cls.mm_session ) );
-	// we may have ipv4 or ipv6 in here, and MM currently on supports ipv4..
-	sq_api->SetField( query, MM_FORM_SERVER_ADDRESS, NET_AddressToString( address ) );
-	sq_api->SetCallback( query, cl_mm_connect_done, NULL );
-	sq_api->Send( query );
+	query->SetClientSession( cls.mm_session );
+	query->SetServerAddress( NET_AddressToString( address ) );
+	query->SendDeletingOnCompletion( [=]( QueryObject *q ) { CL_MM_ClientConnectDone( q ); } );
 
 	return true;
 }
@@ -337,7 +307,7 @@ bool CL_MM_CanConnect( void ) {
 */
 bool CL_MM_WaitForLogin( void ) {
 	while( !CL_MM_CanConnect() ) {
-		sq_api->Poll();
+		QueryObject::Poll();
 		CL_MM_Frame();
 		Sys_Sleep( 20 );
 	}
@@ -385,10 +355,7 @@ bool CL_MM_Initialized( void ) {
 	return cl_mm_enabled;
 }
 
-/*
-* cl_mm_logout_done
-*/
-static void cl_mm_logout_done( stat_query_t *query, bool success, void *customp ) {
+static void CL_MM_LogoutDone( QueryObject * ) {
 	Com_DPrintf( "MM Logout: Logged off..\n" );
 
 	// ignore response-status and just mark us as logged-out
@@ -396,19 +363,14 @@ static void cl_mm_logout_done( stat_query_t *query, bool success, void *customp 
 	cl_mm_enabled = false;
 	cl_mm_loginState = LOGIN_STATE_NONE;
 	cls.mm_session = Uuid_ZeroUuid();
-	cl_mm_StringCopy( NULL, &cl_mm_profile_url );
-	cl_mm_StringCopy( NULL, &cl_mm_profile_url_rml );
+	cl_mm_StringCopy( nullptr, &cl_mm_profile_url );
+	cl_mm_StringCopy( nullptr, &cl_mm_profile_url_rml );
 }
 
 /*
 * CL_MM_Logout
 */
 bool CL_MM_Logout( bool force ) {
-	stat_query_t *query;
-	int64_t timeout;
-	bool result;
-	char uuid_buffer[UUID_BUFFER_SIZE];
-
 	if( !cl_mm_enabled || !Uuid_IsValidSessionId( cls.mm_session ) ) {
 		CL_MM_ErrorMessage( true, "MM Logout: not logged in" );
 		return false;
@@ -420,38 +382,40 @@ bool CL_MM_Logout( bool force ) {
 		return false;
 	}
 
-	query = sq_api->CreateQuery( NULL, "client/logout", false );
-	if( query == NULL ) {
+	QueryObject *query = QueryObject::NewPostQuery( "client/logout" );
+	if( !query ) {
 		return false;
 	}
 
 	cl_mm_logout_semaphore = false;
 
 	// TODO: pull the authkey out of cvar into file
-	sq_api->SetField( query, MM_FORM_CLIENT_SESSION, Uuid_ToString( uuid_buffer, cls.mm_session ) );
-	sq_api->SetCallback( query, cl_mm_logout_done, NULL );
-	sq_api->Send( query );
+	query->SetClientSession( cls.mm_session );
+	query->SendDeletingOnCompletion( [=]( QueryObject *q ) { CL_MM_LogoutDone( q ); } );
 
-	result = true;
-	if( force ) {
-		timeout = Sys_Milliseconds();
-		while( !cl_mm_logout_semaphore && Sys_Milliseconds() < ( timeout + MM_LOGOUT_TIMEOUT ) ) {
-			sq_api->Poll();
-			Sys_Sleep( 10 );
-		}
-
-		result = cl_mm_logout_semaphore;
-		if( !cl_mm_logout_semaphore ) {
-			CL_MM_ErrorMessage( true, "MM Logout: Failed to force logout" );
-		} else {
-			Com_DPrintf( "CL_MM_Logout: force logout successful\n" );
-		}
-
-		cl_mm_logout_semaphore = false;
-
-		// dont call this, we are coming from shutdown
-		// CL_MM_Shutdown( false );
+	if( !force ) {
+		return true;
 	}
+
+	bool result = true;
+	auto timeout = Sys_Milliseconds();
+	while( !cl_mm_logout_semaphore && Sys_Milliseconds() < ( timeout + MM_LOGOUT_TIMEOUT ) ) {
+		QueryObject::Poll();
+		Sys_Sleep( 10 );
+	}
+
+	result = cl_mm_logout_semaphore;
+	if( !cl_mm_logout_semaphore ) {
+		CL_MM_ErrorMessage( true, "MM Logout: Failed to force logout" );
+	} else {
+		Com_DPrintf( "CL_MM_Logout: force logout successful\n" );
+	}
+
+	cl_mm_logout_semaphore = false;
+
+	// dont call this, we are coming from shutdown
+	// CL_MM_Shutdown( false );
+
 	return result;
 }
 
@@ -470,12 +434,8 @@ struct ScopeGuard {
 	void Suppress() { suppressed = true; }
 };
 
-/*
-* cl_mm_login_done
-* callback for login post request
-*/
-static void cl_mm_login_done( stat_query_t *query, bool success, void *customp ) {
-	char uuid_buffer[UUID_BUFFER_SIZE];
+static void CL_MM_LoginDone( QueryObject *query ) {
+	char buffer[UUID_BUFFER_SIZE];
 
 	if( cl_mm_loginState == LOGIN_STATE_NONE ) {
 		Com_DPrintf( "cl_mm_login_done called when no login in process!\n" );
@@ -486,14 +446,14 @@ static void cl_mm_login_done( stat_query_t *query, bool success, void *customp )
 	cls.mm_session = Uuid_ZeroUuid();
 	Cvar_ForceSet( cl_mm_session->name, "" );
 
-	if( !success ) {
+	if( !query->HasSucceeded() ) {
 		// TODO: reset login
 		CL_MM_ErrorMessage( true, "MM Login: StatQuery error" );
 		cl_mm_loginState = LOGIN_STATE_NONE;
 		return;
 	}
 
-	Com_DPrintf( "MM Login: %s\n", sq_api->GetRawResponse( query ) );
+	Com_DPrintf( "MM Login: %s\n", query->RawResponse() );
 
 	ScopeGuard failureGuard([&]() {
 		CL_MM_ErrorMessage( true, "MM Login failure" );
@@ -501,25 +461,7 @@ static void cl_mm_login_done( stat_query_t *query, bool success, void *customp )
 		cl_mm_loginState = LOGIN_STATE_NONE;
 	});
 
-	/*
-	 * ch : new JSON response looks like
-	 * {
-	 *		ready:	// reflects the 'state of login protocol'
-	 *			-1, // for initial login - LOGIN_RESPONSE_HANDLE
-	 *			1, // for login not ready yet - LOGIN_RESPONSE_WAIT
-	 *			2, // ready - LOGIN_RESPONSE_READY
-	 *
-	 *		handle: [uuid],	// handle for login-process
-	 *		id: [uuid],		// valid when ready=2. 0 on error, > 0 otherwise
-	 *		ratings: [
-	 *			{ gametype: [string], rating: [float], deviation: [float] }
-	 *			..
-	 *		]
-	 *	}
-	 */
-
-	stat_query_section_t *root = sq_api->GetRoot( query );
-	if( root == NULL ) {
+	if( !query->ResponseJsonRoot() ) {
 		const char *msg = "MM Login: Failed to parse data at step %d";
 		const char *translated = L10n_TranslateString( "common", msg );
 
@@ -531,10 +473,10 @@ static void cl_mm_login_done( stat_query_t *query, bool success, void *customp )
 		return;
 	}
 
-	const int status = (int)sq_api->GetNumberOrDefault( root, "status", 0 );
-	if( !status ) {
-		const char *error = sq_api->GetStringOrDefault( root, "error", "" );
-		if( error && *error ) {
+	const auto status = query->GetRootDouble( "status", 0 );
+	if( status == 0 ) {
+		const char *error = query->GetRootString( "error", "" );
+		if( *error ) {
 			Com_Printf( "MM Login: Request error at remote host: %s\n", error );
 		} else {
 			Com_Printf( "MM_Login: Bad or missing response status\n" );
@@ -542,7 +484,7 @@ static void cl_mm_login_done( stat_query_t *query, bool success, void *customp )
 		return;
 	}
 
-	const int ready = (int)sq_api->GetNumberOrDefault( root, "ready", LOGIN_RESPONSE_NONE );
+	const auto ready = (int)query->GetRootDouble( "ready", LOGIN_RESPONSE_NONE );
 	if( ready == LOGIN_RESPONSE_NONE ) {
 		Com_DPrintf( "MM Login: Bad response ready value\n" );
 		return;
@@ -552,7 +494,7 @@ static void cl_mm_login_done( stat_query_t *query, bool success, void *customp )
 		// here we are expecting a handle to the validation process
 		if( ready == LOGIN_RESPONSE_HANDLE ) {
 			// we can move to step 2
-			if( !Uuid_FromString( sq_api->GetStringOrDefault( root, "handle", "" ), &cl_mm_loginHandle ) ) {
+			if( !Uuid_FromString( query->GetRootString( "handle", "" ), &cl_mm_loginHandle ) ) {
 				Com_DPrintf( "MM Login: Can't parse a handle\n" );
 				return;
 			}
@@ -564,7 +506,7 @@ static void cl_mm_login_done( stat_query_t *query, bool success, void *customp )
 		}
 	} else if( cl_mm_loginState == LOGIN_STATE_READY && ready == LOGIN_RESPONSE_READY ) {
 		mm_uuid_t session_id = Uuid_ZeroUuid();
-		const char *idString = sq_api->GetStringOrDefault( root, "session_id", "" );
+		const char *idString = query->GetRootString( "session_id", "" );
 		if( !Uuid_FromString( idString, &session_id ) ) {
 			Com_DPrintf( "MM Login: Can't parse session id\n" );
 			return;
@@ -581,41 +523,48 @@ static void cl_mm_login_done( stat_query_t *query, bool success, void *customp )
 		// Switch to "logged in" state
 		cl_mm_enabled = true;
 
-		stat_query_section_t *ratings_section = sq_api->GetSection( root, "ratings" );
-		if( ratings_section ) {
-			int idx = 0;
-			stat_query_section_t *element = sq_api->GetArraySection( ratings_section, idx++ );
-			while( element ) {
-				CL_AddRating( sq_api->GetString( element, "gametype" ),
-							  (float)sq_api->GetNumber( element, "rating" ),
-							  (float)sq_api->GetNumber( element, "deviation" ) );
+		// See remarks of necessity of using std::optional in the corresponding server code...
 
-				element = sq_api->GetArraySection( ratings_section, idx++ );
+		if( const cJSON *rootSection = query->ResponseJsonRoot() ) {
+			ObjectReader rootReader( rootSection );
+			if( const cJSON *ratingsSection = rootReader.GetArray( "ratings" ) ) {
+				ArrayReader ratingsReader( ratingsSection );
+				while( !ratingsReader.IsDone() ) {
+					if( !ratingsReader.IsAtObject() ) {
+						break;
+					}
+					ObjectReader entryReader( ratingsReader.GetChildObject() );
+					const char *gametype = entryReader.GetString( "gametype" );
+					const double rating = entryReader.GetDouble( "rating" );
+					const double deviation = entryReader.GetDouble( "deviation" );
+					if( !gametype || std::isnan( rating ) || std::isnan( deviation ) ) {
+						break;
+					}
+					CL_AddRating( gametype, (float)rating, (float)deviation );
+				}
+			}
+			if( const cJSON *infoSection = rootReader.GetObject( "player_info" ) ) {
+				ObjectReader infoReader( infoSection );
+				const char *profileWebUrl = infoReader.GetString( "profile_web_url", "" );
+				const char *profileRmlUrl = infoReader.GetString( "profile_rml_url", profileWebUrl );
+				cl_mm_StringCopy( profileWebUrl, &cl_mm_profile_url );
+				cl_mm_StringCopy( profileRmlUrl, &cl_mm_profile_url_rml );
+				const char *lastLoginAddress = infoReader.GetString( "last_login_ip", "N/A" );
+				const char *lastLoginTimestamp = infoReader.GetString( "last_login_timestamp", "N/A" );
+				Com_Printf("Last logged in from %s at %s\n", lastLoginAddress, lastLoginTimestamp );
 			}
 		}
-
-		stat_query_section_t *info_section = sq_api->GetSection( root, "player_info" );
-		if( info_section ) {
-			cl_mm_StringCopy( sq_api->GetString( info_section, "profile_web_url" ), &cl_mm_profile_url );
-			cl_mm_StringCopy( sq_api->GetString( info_section, "profile_rml_url" ), &cl_mm_profile_url_rml );
-
-			const char *lastLoginAddress = sq_api->GetString( info_section, "last_login_ip" );
-			lastLoginAddress = lastLoginAddress ? lastLoginAddress : "N/A";
-			const char *lastLoginTimestamp = sq_api->GetString( info_section, "last_login_timestamp" );
-			lastLoginTimestamp = lastLoginTimestamp ? lastLoginTimestamp : "N/A";
-			Com_Printf("Last logged in from %s at %s\n", lastLoginAddress, lastLoginTimestamp );
-		}
 	} else if( cl_mm_loginState == LOGIN_STATE_READY && status == LOGIN_RESPONSE_WAIT ) {
-		Com_DPrintf( "MM Login: Waiting for handle %s", Uuid_ToString( uuid_buffer, cl_mm_loginHandle ) );
+		Com_DPrintf( "MM Login: Waiting for handle %s", cl_mm_loginHandle.ToString( buffer ) );
 	}
 
 	if( cl_mm_loginState == LOGIN_STATE_NONE ) {
 		// Should be reached if and only if the session is valid
 		assert( Uuid_IsValidSessionId( cls.mm_session ) );
 		CL_MM_ErrorMessage( false, "" );
-		Uuid_ToString( uuid_buffer, cls.mm_session );
-		Com_DPrintf( "MM Login: Success, session id %s\n", uuid_buffer );
-		Cvar_ForceSet( cl_mm_session->name, uuid_buffer );
+		cls.mm_session.ToString( buffer );
+		Com_DPrintf( "MM Login: Success, session id %s\n", buffer );
+		Cvar_ForceSet( cl_mm_session->name, buffer );
 	}
 
 	failureGuard.Suppress();
@@ -625,10 +574,7 @@ static void cl_mm_login_done( stat_query_t *query, bool success, void *customp )
 * CL_MM_Login2
 * step 2 of login process
 */
-static bool CL_MM_Login2( void ) {
-	stat_query_t *query;
-	char uuid_buffer[UUID_BUFFER_SIZE];
-
+static bool CL_MM_Login2() {
 	/*
 	* step 2 of login process, poll the login auth with
 	* the handle received in step 1
@@ -640,20 +586,17 @@ static bool CL_MM_Login2( void ) {
 		return false;
 	}
 
-	// TODO: validate the parameters
-	query = sq_api->CreateQuery( NULL, "client/login", false );
-	if( query == NULL ) {
-		Com_Printf( "CL_MM_Login2: Failed to create StatQuery object\n" );
+	QueryObject *query = QueryObject::NewPostQuery( "client/login" );
+	if( !query ) {
 		return false;
 	}
-
-	sq_api->SetField( query, MM_FORM_HANDLE, Uuid_ToString( uuid_buffer, cl_mm_loginHandle ) );
-	sq_api->SetCallback( query, cl_mm_login_done, NULL );
-	sq_api->Send( query );
 
 	cl_mm_loginState = LOGIN_STATE_READY;
 	cl_mm_loginTime = Sys_Milliseconds();
 	cl_mm_loginRetries++;
+
+	query->SetHandle( cl_mm_loginHandle );
+	query->SendDeletingOnCompletion( [=]( QueryObject *q ) { CL_MM_LoginDone( q ); } );
 
 	return true;
 }
@@ -662,8 +605,6 @@ static bool CL_MM_Login2( void ) {
 * CL_MM_LoginReal
 */
 static bool CL_MM_LoginReal( const char *user, const char *password ) {
-	stat_query_t *query;
-
 	/*
 	* step 1 of login process, send the login+passwd to the server,
 	* receive handle to the login process.
@@ -680,47 +621,23 @@ static bool CL_MM_LoginReal( const char *user, const char *password ) {
 		return false;
 	}
 
-	if( cl_mm_login_steam_ok ) {
-		char id[1024];
-		char *ticketb64;
-
-		// TODO: validate the parameters
-		query = sq_api->CreateQuery( NULL, "client/steamLogin", false );
-		if( query == NULL ) {
-			return false;
-		}
-
-		Q_snprintfz( id, sizeof( id ), "%" PRIu64, cl_mm_steam_id );
-		ticketb64 = ( char * )base64_encode( cl_mm_steam_token, cl_mm_steam_token_len, NULL );
-
-		Com_DPrintf( "Logging in with %s %s\n", id, ticketb64 );
-
-		sq_api->SetField( query, "id", id );
-		sq_api->SetField( query, "ticket", ticketb64 );
-
-		free( ticketb64 );
-	} else {
-		// TODO: validate the parameters
-		query = sq_api->CreateQuery( NULL, "client/login", false );
-		if( query == NULL ) {
-			return false;
-		}
-
-		Com_DPrintf( "Logging in with %s %s\n", user, password );
-
-		sq_api->SetField( query, MM_FORM_LOGIN, user );
-		sq_api->SetField( query, MM_FORM_PASSWORD, password );
+	// TODO: validate the parameters
+	QueryObject *query = QueryObject::NewPostQuery( "client/login" );
+	if( !query ) {
+		return false;
 	}
 
-	sq_api->SetCallback( query, cl_mm_login_done, NULL );
-	sq_api->Send( query );
+	Com_DPrintf( "Logging in with %s %s\n", user, password );
 
-	// advance
 	cl_mm_loginState = LOGIN_STATE_WAITING;
 	cl_mm_loginRetries = 0;
 	cl_mm_loginTime = Sys_Milliseconds();
-	cl_mm_StringCopy( NULL, &cl_mm_profile_url );
-	cl_mm_StringCopy( NULL, &cl_mm_profile_url_rml );
+	cl_mm_StringCopy( nullptr, &cl_mm_profile_url );
+	cl_mm_StringCopy( nullptr, &cl_mm_profile_url_rml );
+
+	query->SetLogin( user );
+	query->SetPassword( password );
+	query->SendDeletingOnCompletion( [=]( QueryObject *q ) { CL_MM_LoginDone( q ); } );
 
 	return true;
 }
@@ -936,9 +853,6 @@ void CL_MM_Init( void ) {
 		cl_mm_mempool = Mem_AllocPool( NULL, "cl_mm" );
 	}
 
-	StatQuery_Init();
-	sq_api = StatQuery_GetAPI();
-
 	/*
 	* create cvars
 	*/
@@ -1004,9 +918,6 @@ void CL_MM_Shutdown( bool logout ) {
 	cl_mm_profile_url_rml = NULL;
 
 	cl_mm_steam_token = NULL;
-
-	StatQuery_Shutdown();
-	sq_api = NULL;
 
 	cl_mm_initialized = false;
 }

@@ -21,82 +21,698 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef __MM_QUERY_H__
 #define __MM_QUERY_H__
 
-// Public API for StatQuery for both .exe and modules
+#include "mm_rating.h"
 
-typedef struct stat_query_s stat_query_t;
-typedef /* struct stat_query_section_s */ void* stat_query_section_t;
+#include "../qcommon/wswcurl.h"
+#include "../qcommon/cjson.h"
+
+#ifdef min
+#undef min
+#endif
+
+#ifdef max
+#undef max
+#endif
+
+#include <cstdint>
+#include <cstdlib>
+#include <cassert>
+#include <cstring>
+#include <cmath>
+#include <limits>
+#include <new>
+#include <utility>
+#include <functional>
+#include <atomic>
 
 /**
- * Names of requests form parameters.
- * Usage of symbolic predefined names makes it easier
- * to synchronize requests schema with the server-expected one.
- * (most of these parameter names are used multiple times).
+ * A proxy that wraps an underlying {@code cJSON} value and provides convenient accessor methods.
  */
-#define MM_FORM_SERVER_SESSION "server_session"
-#define MM_FORM_CLIENT_SESSION "client_session"
-#define MM_FORM_TICKET "ticket"
-#define MM_FORM_HANDLE "handle"
-#define MM_FORM_LOGIN "login"
-#define MM_FORM_PASSWORD "password"
-#define MM_FORM_PORT "port"
-#define MM_FORM_AUTH_KEY "auth_key"
-#define MM_FORM_SERVER_NAME "server_name"
-#define MM_FORM_DEMOS_BASEURL "demos_baseurl"
-#define MM_FORM_SERVER_ADDRESS "server_address"
-#define MM_FORM_CLIENT_ADDRESS "client_address"
-#define MM_FORM_JSON_ATTACHMENT "json_attachment"
+class NodeReader {
+protected:
+	const cJSON *const underlying;
 
-typedef struct stat_query_api_s {
-	stat_query_t *( *CreateQuery )( const char *iface, const char *str, bool get );
-	// this is automatically called after calling users callback function so you rarely need to call this yourself
-	void ( *DestroyQuery )( stat_query_t *query );
-	void ( *SetCallback )( stat_query_t *query, void ( *callback_fn )( stat_query_t *, bool, void * ), void *customp );
-	// you may or may not be allowed to call this directly
-	void ( *Send )( stat_query_t *query );
+	explicit NodeReader( const cJSON *underlying_ ): underlying( underlying_ ) {}
 
-	// argument for POST/GET request
-	// note that nothing is encoded in StatQuery atm, so pre-encode or watch what you put in here!
-	void ( *SetField )( stat_query_t *query, const char *name, const char *value );
+	static const char *AsString( const cJSON *node, const char *nameAsField = nullptr );
+	static double AsDouble( const cJSON *node, const char *nameAsField = nullptr );
+};
 
-	// Get data properties
-	stat_query_section_t *( *GetRoot )( stat_query_t * query );
-	stat_query_section_t *( *GetOutRoot )( stat_query_t *query );
-	// named sections/arrays and properties
-	stat_query_section_t *( *GetSection )( stat_query_section_t * parent, const char *name );
-	double ( *GetNumber )( stat_query_section_t *parent, const char *name );
-	double ( *GetNumberOrDefault )( stat_query_section_t *parent, const char *name, double defaultValue );
-	const char *( *GetString )( stat_query_section_t * parent, const char *name );
-	const char *( *GetStringOrDefault )( stat_query_section_t *parent, const char *name, const char *defaultValue );
-	// indexed sections and properties from array
-	int ( *GetArraySize )( stat_query_section_t *array );
-	stat_query_section_t *( *GetArraySection )( stat_query_section_t * parent, int idx );
-	double ( *GetArrayNumber )( stat_query_section_t *array, int idx );
-	const char *( *GetArrayString )( stat_query_section_t * array, int idx );
+/**
+ * A wrapper over a raw {@code cJSON} object value that allows retrieval of fields by name.
+ */
+class ObjectReader: public NodeReader {
+	friend class ArrayReader;
+public:
+	explicit ObjectReader( const cJSON *underlying_ ): NodeReader( underlying_ ) {
+		assert( underlying_->type == cJSON_Object );
+	}
 
-	// Set data properties
-	// named section with key/value pairs inside (leave sectionname NULL, if inside array)
-	stat_query_section_t *( *CreateSection )( stat_query_t * query, stat_query_section_t * parent, const char *sectionname );
-	// named array with unnamed items inside
-	stat_query_section_t *( *CreateArray )( stat_query_t * query, stat_query_section_t * parent, const char *arrayname );
-	// named properties
-	void ( *SetString )( stat_query_section_t *section, const char *name, const char *value );
-	void ( *SetNumber )( stat_query_section_t *section, const char *prop_name, double prop_value );
-	// set property inside sections in array (TODO: remove in favour of GetSection/CreateSection + AddArrayString/Number
-	void ( *SetArrayString )( stat_query_section_t *array, int idx, const char *prop_name, const char *prop_value );
-	void ( *SetArrayNumber )( stat_query_section_t *array, int idx, const char *prop_name, double prop_value );
-	// add unnamed properties to arrays
-	void ( *AddArrayString )( stat_query_section_t *array, const char *prop_value );
-	void ( *AddArrayNumber )( stat_query_section_t *array, double prop_value );
+	const char *GetString( const char *field, const char *defaultValue = nullptr ) const;
+	double GetDouble( const char *field, double defaultValue = std::numeric_limits<double>::quiet_NaN() ) const;
 
-	bool ( *IsArray )( const stat_query_section_t *section );
-	bool ( *IsObject )( const stat_query_section_t *section );
+	cJSON *GetObject( const char *field ) const;
+	cJSON *GetArray( const char *field ) const;
+};
 
-	const char *( *GetRawResponse )( stat_query_t * query );
-	// char *const *( *GetTokenizedResponse )( stat_query_t *query, int *argc );
-	char **( *GetTokenizedResponse )( stat_query_t * query, int *argc );
+/**
+ * A wrapper over a raw {@code cJSON} object value that allows sequential iteration and retrieval of elements.
+ */
+class ArrayReader: public NodeReader {
+	friend class ObjectReader;
 
-	// translates to wswcurl_perform()
-	void ( *Poll )( void );
-} stat_query_api_t;
+	const cJSON *child;
+public:
+	explicit ArrayReader( const cJSON *underlying_ ): NodeReader( underlying_ ) {
+		assert( underlying_->type == cJSON_Object );
+		child = underlying_->child;
+	}
+
+	bool IsDone() const { return child; }
+
+	void Next() {
+		assert( IsDone() );
+		child = child->next;
+	}
+
+	bool IsAtArray() const { return child && child->type == cJSON_Array; }
+	ArrayReader GetChildArray() const { return ArrayReader( child ); }
+	bool IsAtObject() const { return child && child->type == cJSON_Object; }
+	ObjectReader GetChildObject() const { return ObjectReader( child ); }
+};
+
+/**
+ * An object that helps managing a query lifecycle including
+ * setting predefined form parameters and arbitrary JSON attachments,
+ * starting execution of a query, checking a query current status and result retrieval.
+ * @note most of methods are defined inline and hence available at every inclusion site.
+ * Some methods are way too tied with {@code qcommon} stuff and have to be exported in modules (namely the game module).
+ * The {@code FailWith} call should be defined in modules appropriately as well.
+ */
+class QueryObject {
+	friend class QueryWriter;
+	friend class NodeReader;
+	friend class ObjectReader;
+	friend class ArrayReader;
+public:
+	using CompletionCallback = std::function<void( QueryObject * )>;
+
+protected:
+	// An implementation of this is left for every binary it gets included.
+#ifndef _MSC_VER
+	[[noreturn]]
+	static void FailWith( const char *format, ... ) __attribute__( ( format( printf, 1, 2 ) ) );
+#else
+	[[noreturn]]
+	static void FailWith( _Printf_format_string_ const char *format, ... );
+#endif
+private:
+	CompletionCallback completionCallback = []( QueryObject * ) {};
+	cJSON *requestRoot { nullptr };
+	cJSON *responseRoot { nullptr };
+	struct wswcurl_req_s *req { nullptr };
+	char *url { nullptr };
+	char *iface { nullptr };
+	char *rawResponse { nullptr };
+
+	enum Status: uint32_t {
+		CREATED,
+		STARTED,
+		SUCCEEDED,
+		OTHER_FAILURE,
+		NETWORK_FAILURE,
+		SERVER_FAILURE,
+		MALFORMED_REQUEST,
+		MALFORMED_RESPONSE,
+		EXPLICIT_RETRY
+	};
+
+	std::atomic<Status> status { CREATED };
+
+	bool deleteOnCompletion { false };
+
+	QueryObject( const char *url_, const char *iface_ );
+
+	~QueryObject();
+public:
+	static QueryObject *NewGetQuery( const char *url, const char *iface = nullptr );
+	static QueryObject *NewPostQuery( const char *url, const char *iface = nullptr );
+
+	static void DeleteQuery( QueryObject *query ) {
+		query->~QueryObject();
+		::free( query );
+	}
+
+	bool Prepare();
+
+	static void RawCallback( wswcurl_req *req, int wswStatus, void *customp );
+
+	void HandleOtherFailure( wswcurl_req *req, int wswStatus );
+
+	void HandleHttpFailure( wswcurl_req *req, int wswStatus );
+
+	/**
+	 * Should handle situations when {@code RawCallback()} has been called with non-negative status.
+	 * An attempt to get and parse response body should be made.
+	 * {@code this->status} should be set appropriately.
+	 */
+	void HandleHttpSuccess( wswcurl_req *req );
+
+	void SetStatus( Status status_ ) {
+		this->status.store( status_, std::memory_order_relaxed );
+	}
+
+	QueryObject &SetField( const char *name, const char *value ) {
+		if( req ) {
+			wswcurl_formadd( req, name, "%s", value );
+		} else if( url ) {
+			// GET request, store parameters
+			// add in '=', '&' and '\0' = 3
+
+			// FIXME: add proper URL encode
+			size_t len = strlen( url ) + strlen( name ) + strlen( value ) + 3;
+			url = (char *)realloc( url, len );
+			strcat( url, name );
+			strcat( url, "=" );
+			strcat( url, value );
+			strcat( url, "&" );
+		}
+		return *this;
+	}
+
+	QueryObject &SetField( const char *name, const mm_uuid_t &value ) {
+		char buffer[UUID_BUFFER_SIZE];
+		return SetField( name, value.ToString( buffer ) );
+	}
+public:
+	/**
+	 * Reads a root response string field. Provided for convenience.
+	 * @param field the field name
+	 * @param defaultValue a default value for an absent field (should be non-null)
+	 * @return a string value of the read field or the supplied default value
+	 * @note the field must have a string type if present.
+	 */
+	const char *GetRootString( const char *field, const char *defaultValue ) const {
+		return ObjectReader( ResponseJsonRoot() ).GetString( field, defaultValue );
+	}
+
+	/**
+	 * Reads a root response numeric field. Provided for convenience.
+	 * @param field the field name
+	 * @param defaultValue a default value for an absent field (should not be a NAN).
+	 * @return a numeric value of the read field or the supplied default value.
+	 * @note the field must have a numeric type if present.
+	 */
+	double GetRootDouble( const char *field, double defaultValue ) {
+		return ObjectReader( ResponseJsonRoot() ).GetDouble( field, defaultValue );
+	}
+
+	QueryObject &SetServerSession( const char *value ) {
+		return SetField( "server_session", value );
+	}
+
+	QueryObject &SetServerSession( const mm_uuid_t &value ) {
+		return SetField( "server_session", value );
+	}
+
+	QueryObject &SetClientSession( const char *value ) {
+		return SetField( "client_session", value );
+	}
+
+	QueryObject &SetClientSession( const mm_uuid_t &value ) {
+		return SetField( "client_session", value );
+	}
+
+	QueryObject &SetTicket( const mm_uuid_t &value ) {
+		return SetField( "ticket", value );
+	}
+
+	QueryObject &SetHandle( const mm_uuid_t &value ) {
+		return SetField( "handle", value );
+	}
+
+	QueryObject &SetLogin( const char *value ) {
+		return SetField( "login", value );
+	}
+
+	QueryObject &SetPassword( const char *value ) {
+		return SetField( "password", value );
+	}
+
+	QueryObject &SetPort( const char *value ) {
+		return SetField( "port", value );
+	}
+
+	QueryObject &SetAuthKey( const char *value ) {
+		return SetField( "auth_key", value );
+	}
+
+	QueryObject &SetServerName( const char *value ) {
+		return SetField( "server_name", value );
+	}
+
+	QueryObject &SetDemosBaseUrl( const char *value ) {
+		return SetField( "demos_baseurl", value );
+	}
+
+	QueryObject &SetServerAddress( const char *value ) {
+		return SetField( "server_address", value );
+	}
+
+	QueryObject &SetClientAddress( const char *value ) {
+		return SetField( "client_address", value );
+	}
+
+	cJSON *RequestJsonRoot() {
+		if( !req ) {
+			FailWith( "Attempt to add a JSON root to a GET request" );
+		}
+		if( status.load( std::memory_order_seq_cst ) >= STARTED ) {
+			FailWith( "Attempt to add a JSON root to an already started request" );
+		}
+		if( !requestRoot ) {
+			requestRoot = cJSON_CreateObject();
+		}
+		return requestRoot;
+	}
+
+	void CheckStatusOnGet( const char *itemToGet ) const {
+		Status actualStatus = this->status.load( std::memory_order_seq_cst );
+		if( actualStatus < SUCCEEDED ) {
+			FailWith( "Attempt to get %s while the request is not ready yet", itemToGet );
+		} else if( actualStatus > SUCCEEDED ) {
+			FailWith( "Attempt to get %s while the request has failed", itemToGet );
+		}
+	}
+
+	const cJSON *ResponseJsonRoot() const {
+		CheckStatusOnGet( "a JSON response root" );
+		return responseRoot;
+	}
+
+	const char *RawResponse() {
+		CheckStatusOnGet( "a raw response" );
+		return rawResponse;
+	}
+
+	void Fire();
+
+	bool SendForStatusPolling();
+
+	bool SendDeletingOnCompletion( CompletionCallback &&callback );
+
+	static void Poll();
+
+	bool IsReady() const {
+		return status.load( std::memory_order_seq_cst ) >= SUCCEEDED;
+	}
+
+	Status GetCompletionStatus() const {
+		Status actualStatus = status.load( std::memory_order_seq_cst );
+		if( actualStatus < SUCCEEDED ) {
+			FailWith( "Attempt to test status of request that is not ready yet" );
+		}
+		return actualStatus;
+	}
+
+	bool TestStatus( Status testedStatus ) const {
+		return GetCompletionStatus() == testedStatus;
+	}
+
+	bool HasSucceeded() const { return TestStatus( SUCCEEDED ); }
+	bool IsOtherFailure() const { return TestStatus( OTHER_FAILURE ); }
+	bool IsNetworkFailure() const { return TestStatus( NETWORK_FAILURE ); }
+	bool IsServerFailure() const { return TestStatus( SERVER_FAILURE ); }
+	bool WasRequestMalformed() const { return TestStatus( MALFORMED_REQUEST ); }
+	bool WasResponseMalformed() const { return TestStatus( MALFORMED_RESPONSE ); }
+	bool ServerToldToRetry() const { return TestStatus( EXPLICIT_RETRY ); }
+
+	bool ShouldRetry() {
+		Status status_ = GetCompletionStatus();
+		return status_ == EXPLICIT_RETRY || status_ == NETWORK_FAILURE || status_ == SERVER_FAILURE;
+	}
+
+	void ResetForRetry() {
+		assert( IsReady() );
+		status = CREATED;
+
+		if( responseRoot ) {
+			::free( responseRoot );
+			responseRoot = nullptr;
+		}
+
+		if( rawResponse ) {
+			::free( rawResponse );
+			rawResponse = nullptr;
+		}
+
+		deleteOnCompletion = false;
+	}
+};
+
+inline const char* NodeReader::AsString( const cJSON *node, const char *nameAsField ) {
+	if( node && node->type == cJSON_String && node->valuestring ) {
+		return node->valuestring;
+	}
+	if( nameAsField ) {
+		QueryObject::FailWith( "Can't get a string value of `%s`", nameAsField );
+	}
+	QueryObject::FailWith( "Can't get a string value of an array element" );
+}
+
+inline double NodeReader::AsDouble( const cJSON *node, const char *nameAsField ) {
+	if( node && node->type == cJSON_Number ) {
+		return node->valuedouble;
+	}
+	if( nameAsField ) {
+		QueryObject::FailWith( "Can't get a double value of `%s`", nameAsField );
+	}
+	QueryObject::FailWith( "Can't get a double value of an array element" );
+}
+
+inline const char *ObjectReader::GetString( const char *field, const char *defaultValue ) const {
+	cJSON *f = cJSON_GetObjectItem( const_cast<cJSON *>( underlying ), field );
+	if( !f ) {
+		if( defaultValue ) {
+			return defaultValue;
+		}
+		QueryObject::FailWith( "Can't get `%s` field\n", field );
+	}
+	return AsString( f, field );
+}
+
+inline cJSON *ObjectReader::GetObject( const char *field ) const {
+	cJSON *f = cJSON_GetObjectItem( const_cast<cJSON *>( underlying ), field );
+	return ( f && f->type == cJSON_Object ) ? f : nullptr;
+}
+
+inline cJSON *ObjectReader::GetArray( const char *field ) const {
+	cJSON *f = cJSON_GetObjectItem( const_cast<cJSON *>( underlying ), field );
+	return ( f && f->type == cJSON_Array ) ? f : nullptr;
+}
+
+inline double ObjectReader::GetDouble( const char *field, double defaultValue ) const {
+	cJSON *f = cJSON_GetObjectItem( const_cast<cJSON *>( underlying ), field );
+	if( !f ) {
+		if( !std::isnan( defaultValue ) ) {
+			return defaultValue;
+		}
+		QueryObject::FailWith( "Can't get `%s` field\n", field );
+	}
+	return AsDouble( f, field );
+}
+
+class alignas( 8 )QueryWriter {
+	friend class CompoundWriter;
+	friend class ObjectWriter;
+	friend class ArrayWriter;
+	friend struct WritersAllocator;
+
+	static constexpr int STACK_SIZE = 32;
+
+	static bool CheckTopOfStack( const char *tag, int topOfStack_ ) {
+		if( topOfStack_ < 0 || topOfStack_ >= STACK_SIZE ) {
+			const char *kind = topOfStack_ < 0 ? "underflow" : "overflow";
+			QueryObject::FailWith( "%s: Objects stack %s, top of stack index is %d\n", tag, kind, topOfStack_ );
+		}
+		return true;
+	}
+
+	void AddSection( const char *name, cJSON *section ) {
+		cJSON *attachTo = TopOfStack().section;
+		assert( attachTo->type == cJSON_Object || attachTo->type == cJSON_Array );
+		if( attachTo->type == cJSON_Object ) {
+			cJSON_AddItemToObject( attachTo, name, section );
+		} else {
+			cJSON_AddItemToArray( attachTo, section );
+		}
+	}
+
+	void NotifyOfNewArray( const char *name ) {
+		cJSON *section = cJSON_CreateArray();
+		AddSection( name, section );
+		topOfStackIndex++;
+		stack[topOfStackIndex] = writersAllocator.NewArrayWriter( section );
+	}
+
+	void NotifyOfNewObject( const char *name ) {
+		cJSON *section = cJSON_CreateObject();
+		AddSection( name, section );
+		topOfStackIndex++;
+		stack[topOfStackIndex] = writersAllocator.NewObjectWriter( section );
+	}
+
+	void NotifyOfArrayEnd() {
+		writersAllocator.DeleteHelper( &TopOfStack() );
+		topOfStackIndex--;
+	}
+
+	void NotifyOfObjectEnd() {
+		writersAllocator.DeleteHelper( &TopOfStack() );
+		topOfStackIndex--;
+	}
+
+	/**
+	 * An object that can be on top of the stack and that
+	 * actually attaches values to the current top JSON node.
+	 */
+	class CompoundWriter {
+		friend class QueryWriter;
+	protected:
+		QueryWriter *const parent;
+		cJSON *const section;
+
+		int64_t CheckPrecisionLoss( int64_t value ) {
+			// Try to prevent optimizing out this
+			volatile double dValue = value;
+			if( (volatile int64_t)dValue != value ) {
+				QueryObject::FailWith( "Can't store %" PRIi64 " in double without precision loss", value );
+			}
+			return value;
+		}
+	public:
+		CompoundWriter( QueryWriter *parent_, cJSON *section_ )
+			: parent( parent_ ), section( section_ ) {}
+
+		virtual	~CompoundWriter() = default;
+
+		virtual void operator<<( const char *nameOrValue ) = 0;
+		virtual void operator<<( int value ) = 0;
+		virtual void operator<<( int64_t value ) = 0;
+		virtual void operator<<( double value ) = 0;
+		virtual void operator<<( const mm_uuid_t &value ) = 0;
+		virtual void operator<<( char ch ) = 0;
+	};
+
+	/**
+	 * A {@code CompoundWriter} that attaches values to the current top JSON object node.
+	 */
+	class ObjectWriter: public CompoundWriter {
+		const char *fieldName;
+
+		const char *CheckFieldName( const char *tag ) {
+			if( !fieldName ) {
+				QueryObject::FailWith( "QueryWriter::ObjectWriter::operator<<(%s): "
+				    "A field name has not been set before supplying a value", tag );
+			}
+			return fieldName;
+		}
+	public:
+		ObjectWriter( QueryWriter *parent_, cJSON *section_ )
+			: CompoundWriter( parent_, section_ ), fieldName( nullptr ) {}
+
+		void operator<<( const char *nameOrValue ) override {
+			if( !fieldName ) {
+				// TODO: Check whether it is a valid identifier?
+				fieldName = nameOrValue;
+			} else {
+				cJSON_AddStringToObject( section, fieldName, nameOrValue );
+				fieldName = nullptr;
+			}
+		}
+
+		void operator<<( int value ) override {
+			cJSON_AddNumberToObject( section, CheckFieldName( "int" ), value );
+			fieldName = nullptr;
+		}
+
+		void operator<<( int64_t value ) override {
+			cJSON_AddNumberToObject( section, CheckFieldName( "int64_t"), CheckPrecisionLoss( value ) );
+			fieldName = nullptr;
+		}
+
+		void operator<<( double value ) override {
+			cJSON_AddNumberToObject( section, CheckFieldName( "double" ), value );
+			fieldName = nullptr;
+		}
+
+		void operator<<( const mm_uuid_t &value ) override {
+			char buffer[UUID_BUFFER_SIZE];
+			value.ToString( buffer );
+			cJSON_AddStringToObject( section, CheckFieldName( "const mm_uuid_t &" ), buffer );
+			fieldName = nullptr;
+		}
+
+		/**
+		 * Starts a new array/object or ends a current one if valid characters are supplied
+		 */
+		void operator<<( char ch ) override {
+			if( ch == '{' ) {
+				parent->NotifyOfNewObject( CheckFieldName( "{..." ) );
+				fieldName = nullptr;
+			} else if( ch == '[' ) {
+				parent->NotifyOfNewArray( CheckFieldName( "[..." ) );
+				fieldName = nullptr;
+			} else if( ch == '}' ) {
+				parent->NotifyOfObjectEnd();
+			} else if( ch == ']' ) {
+				QueryObject::FailWith( "ArrayWriter::operator<<('...]'): Unexpected token (an array end token)" );
+			} else {
+				QueryObject::FailWith( "ArrayWriter::operator<<(char): Illegal character (%d as an integer)", (int)ch );
+			}
+		}
+	};
+
+	/**
+	 * A {@code CompoundWriter} that attaches values to the current top JSON array node.
+	 */
+	class ArrayWriter: public CompoundWriter {
+	public:
+		ArrayWriter( QueryWriter *parent_, cJSON *section_ )
+			: CompoundWriter( parent_, section_ ) {}
+
+		void operator<<( const char *nameOrValue ) override {
+			cJSON_AddItemToArray( section, cJSON_CreateString( nameOrValue ) );
+		}
+
+		void operator<<( int value ) override {
+			cJSON_AddItemToArray( section, cJSON_CreateNumber( value ) );
+		}
+
+		void operator<<( int64_t value ) override {
+			cJSON_AddItemToArray( section, cJSON_CreateNumber( CheckPrecisionLoss( value ) ) );
+		}
+
+		void operator<<( double value ) override {
+			cJSON_AddItemToArray( section, cJSON_CreateNumber( value ) );
+		}
+
+		void operator<<( const mm_uuid_t &value ) override {
+			char buffer[UUID_BUFFER_SIZE];
+			cJSON_AddItemToArray( section, cJSON_CreateString( value.ToString( buffer ) ) );
+		}
+
+		/**
+		 * Starts a new array/object or ends a current one if valid characters are supplied.
+		 */
+		void operator<<( char ch ) override {
+			if( ch == '[' ) {
+				parent->NotifyOfNewArray( nullptr );
+			} else if( ch == '{' ) {
+				parent->NotifyOfNewObject( nullptr );
+			} else if( ch == ']' ) {
+				parent->NotifyOfArrayEnd();
+			} else if( ch == '}' ) {
+				QueryObject::FailWith( "ArrayWriter::operator<<('...}'): Unexpected token (an object end token)" );
+			} else {
+				QueryObject::FailWith( "ArrayWriter::operator<<(char): Illegal character (%d as an integer)", (int)ch );
+			}
+		}
+	};
+
+	class alignas( 8 )StackedWritersAllocator {
+	protected:
+		static_assert( sizeof( ObjectWriter ) >= sizeof( ArrayWriter ), "Redefine LargestEntry" );
+		using LargestEntry = ObjectWriter;
+
+		static constexpr auto ENTRY_SIZE = ( sizeof( LargestEntry ) % 8 ) ?
+			( sizeof( LargestEntry ) + 8 - sizeof( LargestEntry ) % 8 ) : sizeof( LargestEntry );
+
+		alignas( 8 ) uint8_t storage[STACK_SIZE * ENTRY_SIZE];
+
+		QueryWriter *parent;
+		int topOfStack;
+
+		void *AllocEntry( const char *tag ) {
+			if( CheckTopOfStack( tag, topOfStack ) ) {
+				return storage + ( topOfStack++ ) * ENTRY_SIZE;
+			}
+			return nullptr;
+		}
+	public:
+		explicit StackedWritersAllocator( QueryWriter *parent_ )
+			: parent( parent_ ), topOfStack( 0 ) {
+			if( ( (uintptr_t)this ) % 8 ) {
+				QueryObject::FailWith( "StackedHelpersAllocator(): the object is misaligned!\n" );
+			}
+		}
+
+		ArrayWriter *NewArrayWriter( cJSON *section ) {
+			return new( AllocEntry( "array" ) )ArrayWriter( parent, section );
+		}
+
+		ObjectWriter *NewObjectWriter( cJSON *section ) {
+			return new( AllocEntry( "object" ) )ObjectWriter( parent, section );
+		}
+
+		void DeleteHelper( CompoundWriter *writer ) {
+			writer->~CompoundWriter();
+			if( (uint8_t *)writer != storage + ( topOfStack - 1 ) * ENTRY_SIZE ) {
+				QueryObject::FailWith( "WritersAllocator::DeleteWriter(): "
+									   "Attempt to delete an entry that is not on top of stack\n" );
+			}
+			topOfStack--;
+		}
+	};
+
+	QueryObject *query;
+
+	StackedWritersAllocator writersAllocator;
+
+	// Put the root object onto the top of stack
+	// Do not require closing it explicitly
+	CompoundWriter *stack[32 + 1];
+	int topOfStackIndex { 0 };
+
+	CompoundWriter &TopOfStack() {
+		CheckTopOfStack( "QueryWriter::TopOfStack()", topOfStackIndex );
+		return *stack[topOfStackIndex];
+	}
+public:
+	explicit QueryWriter( QueryObject *query_ )
+		: query( query_ ), writersAllocator( this ) {
+		stack[topOfStackIndex] = writersAllocator.NewObjectWriter( query->RequestJsonRoot());
+	}
+
+	QueryWriter &operator<<( const char *nameOrValue ) {
+		TopOfStack() << nameOrValue;
+		return *this;
+	}
+
+	QueryWriter &operator<<( int value ) {
+		TopOfStack() << value;
+		return *this;
+	}
+
+	QueryWriter &operator<<( int64_t value ) {
+		TopOfStack() << value;
+		return *this;
+	}
+
+	QueryWriter &operator<<( double value ) {
+		TopOfStack() << value;
+		return *this;
+	}
+
+	QueryWriter &operator<<( const mm_uuid_t &value ) {
+		TopOfStack() << value;
+		return *this;
+	}
+
+	QueryWriter &operator<<( char ch ) {
+		TopOfStack() << ch;
+		return *this;
+	}
+};
 
 #endif

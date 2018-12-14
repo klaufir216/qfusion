@@ -1337,6 +1337,18 @@ class StatsowFacade {
 
 	StatsSequence<raceRun_t> raceRuns;
 
+	StatsSequence<raceRun_t> raceRunsToSend;
+
+	/**
+	 * A query currently being executed.
+	 */
+	QueryObject *activeQuery { nullptr };
+
+	/**
+	 * True if new results are produced while the active query is still being processed.
+	 */
+	bool hasPendingResults { false };
+
 	bool isDiscarded { false };
 
 	void AddPlayerReport( edict_t *ent, bool final );
@@ -1349,11 +1361,17 @@ class StatsowFacade {
 	void AddPlayerAwards( class QueryWriter &writer, ClientEntry *cl );
 	void AddPlayerLogFrags( class QueryWriter &writer, ClientEntry *cl );
 	void AddPlayerWeapons( class QueryWriter &writer, ClientEntry *cl, const char **weaponNames );
+
+	bool WaitForQuery();
 public:
 	static void Init();
 	static void Shutdown();
 
 	static StatsowFacade *Instance();
+
+	~StatsowFacade();
+
+	void Frame();
 
 	void ClearEntries();
 
@@ -1362,8 +1380,18 @@ public:
 
 	void WriteHeaderFields( class QueryWriter &writer, int teamGame );
 
-	void SendRaceReport( stat_query_api_s *sq_api );
-	void SendRegularReport( stat_query_api_s *sq_api );
+	/**
+	 * Triggers sending of a race report if necessarily.
+	 * Race reports are sent in a non-blocking fashion.
+	 */
+	void SendRaceReport();
+
+	/**
+	 * Triggers sending of a match report if necessarily.
+	 * Currently blocks for a few seconds trying to get a confirmation.
+	 * @todo implement a local storage for stats so we do not have to wait for this.
+	 */
+	void SendRegularReport();
 
 	void SendReport();
 

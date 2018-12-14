@@ -46,7 +46,7 @@ cvar_t *s_mixahead;
 cvar_t *s_swapstereo;
 cvar_t *s_pseudoAcoustics;
 cvar_t *s_separationDelay;
-cvar_t *s_globalfocus;
+static cvar_t *s_globalfocus;
 
 sfx_t known_sfx[MAX_SFX];
 int num_sfx;

@@ -20,7 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // g_public.h -- game dll information visible to server
 
-#define GAME_API_VERSION    52
+#define GAME_API_VERSION    53
 
 //===============================================================
 
@@ -181,11 +181,11 @@ typedef struct {
 	// angelscript api
 	struct angelwrap_api_s *( *asGetAngelExport )( void );
 
-	// Match reporting to MM
+	class QueryObject *( *MM_NewPostQuery )( const char *url );
+	class QueryObject *( *MM_NewGetQuery )( const char *url );
+	void ( *MM_DeleteQuery )( class QueryObject *query );
+	bool ( *MM_SendQuery )( class QueryObject *query );
 
-	// GAME CANT USE ->Send directly!
-	struct stat_query_api_s *( *GetStatQueryAPI )( void );
-	void ( *MM_SendQuery )( struct stat_query_s *query );
 	void ( *MM_GameState )( bool state );
 } game_import_t;
 

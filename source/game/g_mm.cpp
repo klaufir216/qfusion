@@ -33,297 +33,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <chrono>
 #include <functional>
 #include <new>
 #include <utility>
-
-// A common supertype for query readers/writers
-class alignas( 8 )QueryIOHelper {
-protected:
-	virtual bool CheckTopOfStack( const char *tag, int topOfStack_ ) = 0;
-
-	struct StackedIOHelper {
-		virtual ~StackedIOHelper() {}
-	};
-
-	static constexpr int STACK_SIZE = 32;
-
-	template<typename Parent, typename ObjectIOHelper, typename ArrayIOHelper>
-	class alignas( 8 )StackedHelpersAllocator {
-	protected:
-		static_assert( sizeof( ObjectIOHelper ) >= sizeof( ArrayIOHelper ), "Redefine LargestEntry" );
-		typedef ObjectIOHelper LargestEntry;
-
-		static constexpr auto ENTRY_SIZE =
-			sizeof( LargestEntry ) % 8 ? sizeof( LargestEntry ) + 8 - sizeof( LargestEntry ) % 8 : sizeof( LargestEntry );
-
-		alignas( 8 ) uint8_t storage[STACK_SIZE * ENTRY_SIZE];
-
-		QueryIOHelper *parent;
-		int topOfStack;
-
-		void *AllocEntry( const char *tag ) {
-			if( parent->CheckTopOfStack( tag, topOfStack ) ) {
-				return storage + ( topOfStack++ ) * ENTRY_SIZE;
-			}
-			return nullptr;
-		}
-	public:
-		explicit StackedHelpersAllocator( QueryIOHelper *parent_ ): parent( parent_ ), topOfStack( 0 ) {
-			if( ( (uintptr_t)this ) % 8 ) {
-				G_Error( "StackedHelpersAllocator(): the object is misaligned!\n" );
-			}
-		}
-
-		ArrayIOHelper *NewArrayIOHelper( stat_query_api_t *api, stat_query_section_t *section ) {
-			return new( AllocEntry( "array" ) )ArrayIOHelper( (Parent *)parent, api, section );
-		}
-
-		ObjectIOHelper *NewObjectIOHelper( stat_query_api_t *api, stat_query_section_t *section ) {
-			return new( AllocEntry( "object" ) )ObjectIOHelper( (Parent *)parent, api, section );
-		}
-
-		void DeleteHelper( StackedIOHelper *helper ) {
-			helper->~StackedIOHelper();
-			if( (uint8_t *)helper != storage + ( topOfStack - 1 ) * ENTRY_SIZE ) {
-				G_Error( "WritersAllocator::DeleteWriter(): Attempt to delete an entry that is not on top of stack\n" );
-			}
-			topOfStack--;
-		}
-	};
-};
-
-class alignas( 8 )QueryWriter final: public QueryIOHelper {
-	friend class CompoundWriter;
-	friend class ObjectWriter;
-	friend class ArrayWriter;
-	friend struct WritersAllocator;
-
-	stat_query_api_t *api;
-	stat_query_t *query;
-
-	static constexpr int STACK_SIZE = 32;
-
-	bool CheckTopOfStack( const char *tag, int topOfStack_ ) override {
-		if( topOfStack_ < 0 || topOfStack_ >= STACK_SIZE ) {
-			const char *kind = topOfStack_ < 0 ? "underflow" : "overflow";
-			G_Error( "%s: Objects stack %s, top of stack index is %d\n", tag, kind, topOfStack_ );
-		}
-		return true;
-	}
-
-	void NotifyOfNewArray( const char *name ) {
-		auto *section = api->CreateArray( query, TopOfStack().section, name );
-		topOfStackIndex++;
-		stack[topOfStackIndex] = writersAllocator.NewArrayIOHelper( api, section );
-	}
-
-	void NotifyOfNewObject( const char *name ) {
-		auto *section = api->CreateSection( query, TopOfStack().section, name );
-		topOfStackIndex++;
-		stack[topOfStackIndex] = writersAllocator.NewObjectIOHelper( api, section );
-	}
-
-	void NotifyOfArrayEnd() {
-		writersAllocator.DeleteHelper( &TopOfStack() );
-		topOfStackIndex--;
-	}
-
-	void NotifyOfObjectEnd() {
-		writersAllocator.DeleteHelper( &TopOfStack() );
-		topOfStackIndex--;
-	}
-
-	class CompoundWriter: public StackedIOHelper {
-		friend class QueryWriter;
-	protected:
-		QueryWriter *const parent;
-		stat_query_api_t *const api;
-		stat_query_section_t *const section;
-	public:
-		CompoundWriter( QueryWriter *parent_, stat_query_api_t *api_, stat_query_section_t *section_ )
-			: parent( parent_ ), api( api_ ), section( section_ ) {}
-
-		virtual void operator<<( const char *nameOrValue ) = 0;
-		virtual void operator<<( int value ) = 0;
-		virtual void operator<<( int64_t value ) = 0;
-		virtual void operator<<( double value ) = 0;
-		virtual void operator<<( const mm_uuid_t &value ) = 0;
-		virtual void operator<<( char ch ) = 0;
-	};
-
-	class ObjectWriter: public CompoundWriter {
-		const char *fieldName;
-
-		const char *CheckFieldName( const char *tag ) {
-			if( !fieldName ) {
-				G_Error( "QueryWriter::ObjectWriter::operator<<(%s): "
-						 "A field name has not been set before supplying a value", tag );
-			}
-			return fieldName;
-		}
-	public:
-		ObjectWriter( QueryWriter *parent_, stat_query_api_t *api_, stat_query_section_t *section_ )
-			: CompoundWriter( parent_, api_, section_ ), fieldName( nullptr ) {}
-
-		void operator<<( const char *nameOrValue ) override {
-			if( !fieldName ) {
-				// TODO: Check whether it is a valid identifier?
-				fieldName = nameOrValue;
-			} else {
-				api->SetString( section, fieldName, nameOrValue );
-				fieldName = nullptr;
-			}
-		}
-
-		void operator<<( int value ) override {
-			api->SetNumber( section, CheckFieldName( "int" ), value );
-			fieldName = nullptr;
-		}
-
-		void operator<<( int64_t value ) override {
-			if( (int64_t)( (double)value ) != value ) {
-				G_Error( "ObjectWriter::operator<<(int64_t): The value %"
-							 PRIi64 " will be lost in conversion to double", value );
-			}
-			api->SetNumber( section, CheckFieldName( "int64_t" ), value );
-			fieldName = nullptr;
-		}
-
-		void operator<<( double value ) override {
-			api->SetNumber( section, CheckFieldName( "double" ), value );
-			fieldName = nullptr;
-		}
-
-		void operator<<( const mm_uuid_t &value ) override {
-			char buffer[UUID_BUFFER_SIZE];
-			api->SetString( section, CheckFieldName( "const mm_uuid_t &" ), value.ToString( buffer ) );
-			fieldName = nullptr;
-		}
-
-		void operator<<( char ch ) override {
-			if( ch == '{' ) {
-				parent->NotifyOfNewObject( CheckFieldName( "{..." ) );
-				fieldName = nullptr;
-			} else if( ch == '[' ) {
-				parent->NotifyOfNewArray( CheckFieldName( "[..." ) );
-				fieldName = nullptr;
-			} else if( ch == '}' ) {
-				parent->NotifyOfObjectEnd();
-			} else if( ch == ']' ) {
-				G_Error( "ArrayWriter::operator<<('...]'): Unexpected token (an array end token)" );
-			} else {
-				G_Error( "ArrayWriter::operator<<(char): Illegal character (%d as an integer)", (int)ch );
-			}
-		}
-	};
-
-	class ArrayWriter: public CompoundWriter {
-	public:
-		ArrayWriter( QueryWriter *parent_, stat_query_api_t *api_, stat_query_section_t *section_ )
-			: CompoundWriter( parent_, api_, section_ ) {}
-
-		void operator<<( const char *nameOrValue ) override {
-			api->AddArrayString( section, nameOrValue );
-		}
-
-		void operator<<( int value ) override {
-			api->AddArrayNumber( section, value );
-		}
-
-		void operator<<( int64_t value ) override {
-			api->AddArrayNumber( section, value );
-		}
-
-		void operator<<( double value ) override {
-			api->AddArrayNumber( section, value );
-		}
-
-		void operator<<( const mm_uuid_t &value ) override {
-			char buffer[UUID_BUFFER_SIZE];
-			api->AddArrayString( section, value.ToString( buffer ) );
-		}
-
-		void operator<<( char ch ) override {
-			if( ch == '[' ) {
-				parent->NotifyOfNewArray( nullptr );
-			} else if( ch == '{' ) {
-				parent->NotifyOfNewObject( nullptr );
-			} else if( ch == ']' ) {
-				parent->NotifyOfArrayEnd();
-			} else if( ch == '}' ) {
-				G_Error( "ArrayWriter::operator<<('...}'): Unexpected token (an object end token)");
-			} else {
-				G_Error( "ArrayWriter::operator<<(char): Illegal character (%d as an integer)", (int)ch );
-			}
-		}
-	};
-
-	struct WritersAllocator: public StackedHelpersAllocator<QueryWriter, ObjectWriter, ArrayWriter> {
-		explicit WritersAllocator( QueryWriter *parent_ ): StackedHelpersAllocator( parent_ ) {}
-	};
-
-	WritersAllocator writersAllocator;
-
-	// Put the root object onto the top of stack
-	// Do not require closing it explicitly
-	CompoundWriter *stack[32 + 1];
-	int topOfStackIndex;
-
-	CompoundWriter &TopOfStack() {
-		CheckTopOfStack( "QueryWriter::TopOfStack()", topOfStackIndex );
-		return *stack[topOfStackIndex];
-	}
-public:
-	QueryWriter( stat_query_api_t *api_, const char *url )
-		: api( api_ ), writersAllocator( this ) {
-		query = api->CreateQuery( nullptr, url, false );
-		topOfStackIndex = 0;
-		stack[topOfStackIndex] = writersAllocator.NewObjectIOHelper( api, api->GetOutRoot( query ) );
-	}
-
-	QueryWriter &operator<<( const char *nameOrValue ) {
-		G_Printf("Writer: <<%s \n", nameOrValue);
-		TopOfStack() << nameOrValue;
-		return *this;
-	}
-
-	QueryWriter &operator<<( int value ) {
-		TopOfStack() << value;
-		return *this;
-	}
-
-	QueryWriter &operator<<( int64_t value ) {
-		TopOfStack() << value;
-		return *this;
-	}
-
-	QueryWriter &operator<<( double value ) {
-		TopOfStack() << value;
-		return *this;
-	}
-
-	QueryWriter &operator<<( const mm_uuid_t &value ) {
-		TopOfStack() << value;
-		return *this;
-	}
-
-	QueryWriter &operator<<( char ch ) {
-		TopOfStack() << ch;
-		return *this;
-	}
-
-	void Send() {
-		if( topOfStackIndex != 0 ) {
-			G_Error( "QueryWriter::Send(): Root object building is incomplete, remaining stack depth is %d\n", topOfStackIndex );
-		}
-
-		// Note: Do not call api->Send() directly, let the server code perform an augmentation of the request!
-		trap_MM_SendQuery( query );
-	}
-};
-
-
+#include <thread>
 
 static SingletonHolder<StatsowFacade> statsHolder;
 
@@ -637,6 +351,102 @@ StatsowFacade *StatsowFacade::Instance() {
 	return statsInstanceHolder.Instance();
 }
 
+StatsowFacade::~StatsowFacade() {
+	if( activeQuery ) {
+		bool succeeded = WaitForQuery();
+		trap_MM_DeleteQuery( activeQuery );
+		if( succeeded ) {
+			return;
+		}
+
+		if( raceRunsToSend.empty() ) {
+			return;
+		}
+
+		raceRuns.MergeWith( std::move( raceRunsToSend ) );
+		hasPendingResults = true;
+	}
+
+	if( !hasPendingResults ) {
+		return;
+	}
+
+	SendRaceReport();
+	if( activeQuery ) {
+		(void)WaitForQuery();
+		trap_MM_DeleteQuery( activeQuery );
+	}
+}
+
+bool StatsowFacade::WaitForQuery() {
+	assert( activeQuery );
+
+	// This is ugly af but it helps to avoid intrusive changes to the
+	int numAttepts = 0;
+	for(;; ) {
+		trap_MM_SendQuery( activeQuery );
+
+		std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+		while( !activeQuery->IsReady() ) {
+			std::this_thread::sleep_for( std::chrono::milliseconds( 16 ) );
+		}
+
+		if( activeQuery->HasSucceeded() ) {
+			G_Printf( "The query we were waiting for has been sent successfully\n" );
+			return true;
+		}
+
+		const char *const tag = "StatsowFacade::WaitForQuery()";
+		if( !activeQuery->ShouldRetry() ) {
+			G_Printf( S_COLOR_RED "%s: Unrecoverable error. Query data is lost\n", tag );
+			return false;
+		}
+		if( numAttepts == 2 ) {
+			G_Printf( S_COLOR_RED "%s: Stopping fruitless retry attempt. Query data is lost\n", tag );
+			return false;
+		}
+
+		numAttepts++;
+		activeQuery->ResetForRetry();
+		std::this_thread::sleep_for( std::chrono::milliseconds( 250 + 250 * numAttepts ) );
+	}
+}
+
+void StatsowFacade::Frame() {
+	if( !activeQuery ) {
+		if( hasPendingResults && !raceRuns.empty() ) {
+			// Start sending a race report for pending results
+			SendRaceReport();
+			hasPendingResults = false;
+		}
+		return;
+	}
+
+	if( !activeQuery->IsReady() ) {
+		return;
+	}
+
+	if( activeQuery->HasSucceeded() ) {
+		trap_MM_DeleteQuery( activeQuery );
+		activeQuery = nullptr;
+		// We're going to check for pending results next frame
+		return;
+	}
+
+	if( activeQuery->ShouldRetry() ) {
+		activeQuery->ResetForRetry();
+		trap_MM_SendQuery( activeQuery );
+		return;
+	}
+
+	trap_MM_DeleteQuery( activeQuery );
+	// There should currently be some race runs to deliver
+	assert( !raceRunsToSend.empty() );
+	// Add non-delivered race runs to the accumulated ones
+	raceRuns.MergeWith( std::move( raceRunsToSend ) );
+	hasPendingResults = true;
+}
+
 void StatsowFacade::ClearEntries() {
 	ClientEntry *next;
 	for( ClientEntry *e = clientEntriesHead; e; e = next ) {
@@ -920,7 +730,7 @@ void StatsowFacade::WriteHeaderFields( QueryWriter &writer, int teamGame ) {
 	}
 }
 
-void StatsowFacade::SendRegularReport( stat_query_api_t *sq_api ) {
+void StatsowFacade::SendRegularReport() {
 	int i, teamGame, duelGame;
 	static const char *weapnames[WEAP_TOTAL] = { nullptr };
 
@@ -929,7 +739,13 @@ void StatsowFacade::SendRegularReport( stat_query_api_t *sq_api ) {
 		return;
 	}
 
-	QueryWriter writer( sq_api, "server/matchReport" );
+	if( activeQuery ) {
+		hasPendingResults = true;
+		return;
+	}
+
+	QueryObject *query = activeQuery = trap_MM_NewPostQuery( "server/matchReport" );
+	QueryWriter writer( query );
 
 	// ch : race properties through GS_RaceGametype()
 
@@ -1007,7 +823,8 @@ void StatsowFacade::SendRegularReport( stat_query_api_t *sq_api ) {
 	}
 	writer << ']';
 
-	writer.Send();
+	// TODO: We have to wait for completion then try again if needed and always delete the query anyway
+	trap_MM_SendQuery( query );
 }
 
 void StatsowFacade::AddPlayerAwards( QueryWriter &writer, ClientEntry *cl ) {
@@ -1119,13 +936,8 @@ void StatsowFacade::AddPlayerWeapons( QueryWriter &writer, ClientEntry *cl, cons
 void StatsowFacade::SendReport() {
 	// TODO: check if MM is enabled
 
-	stat_query_api_t *sq_api = trap_GetStatQueryAPI();
-	if( !sq_api ) {
-		return;
-	}
-
 	if( GS_RaceGametype() ) {
-		SendRaceReport( sq_api );
+		SendRaceReport();
 		return;
 	}
 
@@ -1144,14 +956,14 @@ void StatsowFacade::SendReport() {
 	} else {
 		// check if we have enough players to report (at least 2)
 		if( clientEntriesHead && clientEntriesHead->next ) {
-			SendRegularReport( sq_api );
+			SendRegularReport();
 		}
 	}
 
 	ClearEntries();
 }
 
-void StatsowFacade::SendRaceReport( stat_query_api_t *sq_api ) {
+void StatsowFacade::SendRaceReport() {
 	if( !GS_RaceGametype() ) {
 		G_Printf( S_COLOR_YELLOW "G_Match_RaceReport.. not race gametype\n" );
 		return;
@@ -1161,7 +973,14 @@ void StatsowFacade::SendRaceReport( stat_query_api_t *sq_api ) {
 		return;
 	}
 
-	QueryWriter writer( sq_api, "server/matchReport" );
+	if( activeQuery ) {
+		hasPendingResults = true;
+		return;
+	}
+
+	QueryObject *query = activeQuery = trap_MM_NewPostQuery( "server/matchReport" );
+
+	QueryWriter writer( query );
 
 	WriteHeaderFields( writer, false );
 
@@ -1192,7 +1011,29 @@ void StatsowFacade::SendRaceReport( stat_query_api_t *sq_api ) {
 	}
 	writer << ']';
 
-	writer.Send();
+	raceRunsToSend.Clear();
+	raceRunsToSend.MergeWith( std::move( raceRuns ) );
+	assert( raceRuns.empty() );
+	assert( !raceRuns.empty() );
 
-	raceRuns.Clear();
+	// Make sure we've marked the query as an active
+	assert( activeQuery );
+	// Start sending again. Start polling activeQuery status next frame
+	trap_MM_SendQuery( query );
 }
+
+#ifndef GAME_HARD_LINKED
+// While most of the stuff is defined inline in the class
+// and some parts that rely on qcommon too much are imported
+// this implementation is specific for a binary we use this stuff in.
+void QueryObject::FailWith( const char *format, ... ) {
+	char buffer[2048];
+
+	va_list va;
+	va_start( va, format );
+	Q_vsnprintfz( buffer, sizeof( buffer ), format, va );
+	va_end( va );
+
+	trap_Error( buffer );
+}
+#endif

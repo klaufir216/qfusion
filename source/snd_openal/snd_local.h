@@ -105,8 +105,6 @@ extern cvar_t *s_hrtf;
 // Has effect only if environment effects are turned on
 extern cvar_t *s_realistic_obstruction;
 
-extern cvar_t *s_globalfocus;
-
 extern int s_attenuation_model;
 extern float s_attenuation_maxdistance;
 extern float s_attenuation_refdistance;

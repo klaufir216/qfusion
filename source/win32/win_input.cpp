@@ -324,7 +324,7 @@ static bool IN_InitDInput( void ) {
 	}
 
 	if( !pDirectInputCreate ) {
-		pDirectInputCreate = (void *)GetProcAddress( hInstDI, "DirectInputCreateA" );
+		pDirectInputCreate = (decltype( pDirectInputCreate ))(void *)GetProcAddress( hInstDI, "DirectInputCreateA" );
 
 		if( !pDirectInputCreate ) {
 			Com_Printf( "Couldn't get DI proc addr\n" );
@@ -341,7 +341,7 @@ static bool IN_InitDInput( void ) {
 	}
 
 	// obtain an interface to the system mouse device
-	hr = IDirectInput_CreateDevice( g_pdi, &qGUID_SysMouse, &g_pMouse, NULL );
+	hr = IDirectInput_CreateDevice( g_pdi, qGUID_SysMouse, &g_pMouse, NULL );
 
 	if( FAILED( hr ) ) {
 		Com_Printf( "Couldn't open DI mouse device\n" );
@@ -515,7 +515,7 @@ bool IN_RawInput_Init( void ) {
 	}
 
 	// Allocate the array to hold the DeviceList
-	pRawInputDeviceList = Mem_ZoneMalloc( sizeof( RAWINPUTDEVICELIST ) * inputdevices );
+	pRawInputDeviceList = (PRAWINPUTDEVICELIST)Mem_ZoneMalloc( sizeof( RAWINPUTDEVICELIST ) * inputdevices );
 
 	// 2nd call to GetRawInputDeviceList: Pass the pointer to our DeviceList and GetRawInputDeviceList() will fill the array
 	if( ( *_GRIDL )( pRawInputDeviceList, &inputdevices, sizeof( RAWINPUTDEVICELIST ) ) == -1 ) {
@@ -549,7 +549,7 @@ bool IN_RawInput_Init( void ) {
 	}
 
 	// Loop again and bind devices
-	rawmice = Mem_ZoneMalloc( sizeof( rawmouse_t ) * mtemp );
+	rawmice = (rawmouse_t *)Mem_ZoneMalloc( sizeof( rawmouse_t ) * mtemp );
 	for( i = 0; i < inputdevices; i++ ) {
 		if( pRawInputDeviceList[i].dwType == RIM_TYPEMOUSE ) {
 			j = MAX_RI_DEVICE_SIZE;
@@ -585,7 +585,7 @@ bool IN_RawInput_Init( void ) {
 	Mem_ZoneFree( pRawInputDeviceList );
 
 	// alloc raw input buffer
-	raw = Mem_ZoneMalloc( INIT_RIBUFFER_SIZE );
+	raw = (RAWINPUT *)Mem_ZoneMalloc( INIT_RIBUFFER_SIZE );
 	ribuffersize = INIT_RIBUFFER_SIZE;
 
 	return true;
@@ -627,7 +627,7 @@ void IN_RawInput_MouseRead( HANDLE in_device_handle ) {
 
 	if( dwSize > ribuffersize ) {
 		ribuffersize = dwSize;
-		raw = Mem_Realloc( raw, dwSize );
+		raw = (RAWINPUT *)Mem_Realloc( raw, dwSize );
 	}
 
 	if( ( *_GRID )( (HRAWINPUT)in_device_handle, RID_INPUT, raw, &dwSize, sizeof( RAWINPUTHEADER ) ) != dwSize ) {
@@ -1031,7 +1031,7 @@ static void IN_XInput_Init( void ) {
 		return;
 	}
 
-	pXInputGetState = ( void * )GetProcAddress( in_xinput_dll, "XInputGetState" );
+	pXInputGetState = (decltype( pXInputGetState ))( void * )GetProcAddress( in_xinput_dll, "XInputGetState" );
 	if( !pXInputGetState ) {
 		Com_Printf( "XInput: Couldn't load symbol XInputGetState\n" );
 		FreeLibrary( in_xinput_dll );
@@ -1191,7 +1191,8 @@ static BOOL( WINAPI * qimmNotifyIME )( HIMC hIMC, DWORD dwAction, DWORD dwIndex,
 * In_WinIME_GPA
 */
 void *In_WinIME_GPA( const char *name ) {
-	void *p = GetProcAddress( in_winime_dll, name );
+	// MinGW requires casting to (void *) first
+	void *p = (void *)GetProcAddress( in_winime_dll, name );
 
 	if( !p ) {
 		Com_Printf( "IME: Couldn't load symbol: %s\n", name );
@@ -1212,14 +1213,14 @@ void IN_WinIME_Init( void ) {
 	}
 
 	in_winime_initialized = true;
-	qimmAssociateContext = In_WinIME_GPA( "ImmAssociateContext" );
-	qimmCreateContext = In_WinIME_GPA( "ImmCreateContext" );
-	qimmDestroyContext = In_WinIME_GPA( "ImmDestroyContext" );
-	qimmGetCandidateList = In_WinIME_GPA( "ImmGetCandidateListW" );
-	qimmGetCompositionString = In_WinIME_GPA( "ImmGetCompositionStringW" );
-	qimmGetConversionStatus = In_WinIME_GPA( "ImmGetConversionStatus" );
-	qimmGetProperty = In_WinIME_GPA( "ImmGetProperty" );
-	qimmNotifyIME = In_WinIME_GPA( "ImmNotifyIME" );
+	qimmAssociateContext = (decltype( qimmAssociateContext ))In_WinIME_GPA( "ImmAssociateContext" );
+	qimmCreateContext = (decltype( qimmCreateContext ))In_WinIME_GPA( "ImmCreateContext" );
+	qimmDestroyContext = (decltype( qimmDestroyContext ))In_WinIME_GPA( "ImmDestroyContext" );
+	qimmGetCandidateList = (decltype( qimmGetCandidateList ))In_WinIME_GPA( "ImmGetCandidateListW" );
+	qimmGetCompositionString = (decltype( qimmGetCompositionString ))In_WinIME_GPA( "ImmGetCompositionStringW" );
+	qimmGetConversionStatus = (decltype( qimmGetConversionStatus ))In_WinIME_GPA( "ImmGetConversionStatus" );
+	qimmGetProperty = (decltype( qimmGetProperty ))In_WinIME_GPA( "ImmGetProperty" );
+	qimmNotifyIME = (decltype( qimmNotifyIME ))In_WinIME_GPA( "ImmNotifyIME" );
 	if( !in_winime_initialized ) {
 		IN_WinIME_Shutdown();
 		return;
@@ -1397,7 +1398,7 @@ unsigned int IN_IME_GetCandidates( char * const *cands, size_t candSize, unsigne
 	}
 
 	if( candListSize > in_winime_candListSize ) {
-		candList = Q_realloc( candList, candListSize );
+		candList = (CANDIDATELIST *)Q_realloc( candList, candListSize );
 		if( !candList ) {
 			return 0;
 		}

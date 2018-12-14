@@ -45,20 +45,14 @@ static bool sv_mm_initialized = false;
 static mm_uuid_t sv_mm_session;
 
 // local session counter
-static unsigned int sv_mm_localsession;
 static int64_t sv_mm_last_heartbeat;
 static bool sv_mm_logout_semaphore = false;
 
 // flag for gamestate = game-on
 static bool sv_mm_gameon = false;
 
-static stat_query_t *sv_login_query = NULL;
-
-static stat_query_api_t *sq_api = NULL;
-
 static char sv_mm_match_uuid[37];
-static unsigned sv_mm_next_match_uuid_fetch;
-static stat_query_t *sv_mm_match_uuid_fetch_query;
+static int64_t sv_mm_next_match_uuid_fetch;
 static void (*sv_mm_match_uuid_callback_fn)( const char *uuid );
 
 /*
@@ -67,12 +61,10 @@ static void (*sv_mm_match_uuid_callback_fn)( const char *uuid );
 cvar_t *sv_mm_authkey;
 cvar_t *sv_mm_enable;
 cvar_t *sv_mm_loginonly;
-cvar_t *sv_mm_debug_reportbots;
 
 /*
 * prototypes
 */
-static void SV_MM_ReportMatch( const char *report );
 static bool SV_MM_Login( void );
 static void SV_MM_Logout( bool force );
 static void SV_MM_GetMatchUUIDThink( void );
@@ -98,19 +90,22 @@ static client_t *SV_MM_ClientForSession( mm_uuid_t session_id ) {
 	return NULL;
 }
 
-//======================================
-//		HTTP REQUESTS
-//======================================
-
-struct stat_query_s *SV_MM_CreateQuery( const char *iface, const char *url, bool get ) {
-	return sq_api->CreateQuery( sv_ip->string, url, false );
+class QueryObject *SV_MM_NewGetQuery( const char *url ) {
+	return QueryObject::NewGetQuery( url, sv_ip->string );
 }
 
-void SV_MM_SendQuery( struct stat_query_s *query ) {
-	char uuid_buffer[UUID_BUFFER_SIZE];
-	// add our session id
-	sq_api->SetField( query, MM_FORM_SERVER_SESSION, Uuid_ToString( uuid_buffer, sv_mm_session ) );
-	sq_api->Send( query );
+class QueryObject *SV_MM_NewPostQuery( const char *url ) {
+	return QueryObject::NewPostQuery( url, sv_ip->string );
+}
+
+void SV_MM_DeleteQuery( class QueryObject *query ) {
+	QueryObject::DeleteQuery( query );
+}
+
+bool SV_MM_SendQuery( class QueryObject *query ) {
+	// TODO: Check?
+	query->SetServerSession( sv_mm_session );
+	return query->SendForStatusPolling();
 }
 
 // TODO: instead of this, factor ClientDisconnect to game module which can flag
@@ -119,59 +114,21 @@ void SV_MM_GameState( bool gameon ) {
 	sv_mm_gameon = gameon;
 }
 
-static void sv_mm_heartbeat_done( stat_query_t *query, bool success, void *customp ) {
-}
-
-void SV_MM_Heartbeat( void ) {
-	stat_query_t *query;
-	char uuid_buffer[UUID_BUFFER_SIZE];
-
+void SV_MM_Heartbeat() {
 	if( !sv_mm_initialized || !Uuid_IsValidSessionId( sv_mm_session ) ) {
 		return;
 	}
 
-	// push a request
-	query = sq_api->CreateQuery( sv_ip->string, "server/heartbeat", false );
-	if( query == NULL ) {
+	QueryObject *query = QueryObject::NewPostQuery( "server/heartbeat", sv_ip->string );
+	if( !query ) {
 		return;
 	}
 
-	// servers own session (TODO: put this to a cookie or smth)
-	sq_api->SetField( query, MM_FORM_SERVER_SESSION, Uuid_ToString( uuid_buffer, sv_mm_session ) );
-
-	// redundant atm
-	sq_api->SetCallback( query, sv_mm_heartbeat_done, NULL );
-	sq_api->Send( query );
-}
-
-typedef struct client_disconnect_context_s {
-	mm_uuid_t session_id;
-} client_disconnect_context_t;
-
-/*
-* sv_mm_clientdisconnect_done
-* This only exists so that we are sure the message got through
-*/
-static void sv_mm_clientdisconnect_done( stat_query_t *query, bool success, void *customp ) {
-	client_disconnect_context_t *context;
-	char uuid_buffer[UUID_BUFFER_SIZE];
-
-	context = ( client_disconnect_context_t *)customp;
-
-	if( success == true ) {
-		Com_Printf( "SV_MM_ClientDisconnect: Acknowledged %s\n", Uuid_ToString( uuid_buffer, context->session_id ) );
-	} else {
-		Com_Printf( "SV_MM_ClientDisconnect: Error\n" );
-	}
-
-	Mem_ZoneFree( context );
+	query->SetServerSession( sv_mm_session );
+	query->SendDeletingOnCompletion([]( QueryObject * ) {});
 }
 
 void SV_MM_ClientDisconnect( client_t *client ) {
-	stat_query_t *query;
-	client_disconnect_context_t *context;
-	char uuid_buffer[UUID_BUFFER_SIZE];
-
 	if( !sv_mm_initialized || !Uuid_IsValidSessionId( sv_mm_session ) ) {
 		return;
 	}
@@ -181,27 +138,22 @@ void SV_MM_ClientDisconnect( client_t *client ) {
 		return;
 	}
 
-	// push a request
-	query = sq_api->CreateQuery( sv_ip->string, "server/clientDisconnect", false );
-	if( query == NULL ) {
+	QueryObject *query = QueryObject::NewPostQuery( "server/clientDisconnect", sv_ip->string );
+	if( !query ) {
 		return;
 	}
 
-	sq_api->SetField( query, MM_FORM_SERVER_SESSION, Uuid_ToString( uuid_buffer, sv_mm_session ) );
-	sq_api->SetField( query, MM_FORM_CLIENT_SESSION, Uuid_ToString( uuid_buffer, client->mm_session ) );
-
-	context = ( client_disconnect_context_t *)Mem_ZoneMalloc( sizeof( client_disconnect_context_t ) );
-	context->session_id = client->mm_session;
-
-	//
-	sq_api->SetCallback( query, sv_mm_clientdisconnect_done, context );
-	sq_api->Send( query );
+	query->SetServerSession( sv_mm_session );
+	query->SetClientSession( client->mm_session );
+	query->SendDeletingOnCompletion( [=]( QueryObject *query ) {
+		if( query->HasSucceeded() ) {
+			char buffer[UUID_BUFFER_SIZE];
+			Com_Printf( "SV_MM_ClientDisconnect: Acknowledged %s\n", client->mm_session.ToString( buffer ) );
+		} else {
+			Com_Printf( "SV_MM_ClientDisconnect: Error\n" );
+		}
+	});
 }
-
-typedef struct client_done_context_s {
-	mm_uuid_t session_id;
-	client_t *client;
-} client_done_context_t;
 
 struct ScopeGuard {
 	const std::function<void()> &atExit;
@@ -218,19 +170,9 @@ struct ScopeGuard {
 	void Suppress() { suppressed = true; }
 };
 
-/*
-* sv_clientconnect_done
-* callback for clientconnect POST request
-*/
-static void sv_mm_clientconnect_done( stat_query_t *query, bool success, void *customp ) {
+static void SV_MM_ClientConnectDone( QueryObject *query, client_t *cl ) {
 	bool userinfo_changed;
 	char uuid_buffer[UUID_BUFFER_SIZE];
-
-	client_done_context_t *context = ( client_done_context_t *)customp;
-	// Save local copies of the context fields on stack
-	client_t *cl = context->client;
-	// Free no longer needed context
-	Mem_ZoneFree( customp );
 
 	// Happens if a game module rejects connection
 	if( !cl->edict ) {
@@ -266,20 +208,19 @@ static void sv_mm_clientconnect_done( stat_query_t *query, bool success, void *c
 
 	ScopeGuard failureGuard( onFailure );
 
-	if( !success ) {
+	if( !query->HasSucceeded() ) {
 		Com_Printf( "SV_MM_ClientConnect: Remote or network failure\n" );
 		return;
 	}
 
-	if( !query ) {
-		Com_Printf( "SV_MM_ParseResponse: Failed to parse data\n" );
+	if( !query->ResponseJsonRoot() ) {
+		Com_Printf( "SV_MM_ClientConnect: failed to parse a raw response\n" );
 		return;
 	}
 
-	stat_query_section_t *root = sq_api->GetRoot( query );
-	if( (int)sq_api->GetNumberOrDefault( root, "banned", 0 ) ) {
-		const char *reason = sq_api->GetStringOrDefault( root, "reason", "" );
-		if( !reason || !*reason ) {
+	if( query->GetRootDouble( "banned", 0 ) != 0 ) {
+		const char *reason = query->GetRootString( "reason", "" );
+		if( !*reason ) {
 			reason = "Your account at " APP_URL " has been banned.";
 		}
 
@@ -287,10 +228,9 @@ static void sv_mm_clientconnect_done( stat_query_t *query, bool success, void *c
 		return;
 	}
 
-	const int status = (int)sq_api->GetNumberOrDefault( root, "status", 0 );
-	if( !status ) {
-		const char *error = sq_api->GetStringOrDefault( root, "error", "" );
-		if( error && *error ) {
+	if( query->GetRootDouble( "status", 0 ) == 0 ) {
+		const char *error = query->GetRootString( "error", "" );
+		if( *error ) {
 			Com_Printf( "SV_MM_ClientConnect: Request error at remote host: %s\n", error );
 		} else {
 			Com_Printf( "SV_MM_ClientConnect: Bad or missing response status\n" );
@@ -301,26 +241,29 @@ static void sv_mm_clientconnect_done( stat_query_t *query, bool success, void *c
 	// Note: we have omitted client session id comparisons,
 	// it has to be performed on server anyway and a mismatch yields a failed response.
 
-	// Check
-	stat_query_section_t *info_section = sq_api->GetSection( root, "player_info" );
-	if( !info_section ) {
+	ObjectReader rootReader( query->ResponseJsonRoot() );
+	// TODO: This would have been better if we could rely on std::optional support and just return optional<ObjectReader>
+	cJSON *infoSection = rootReader.GetObject( "player_info" );
+	if( !infoSection ) {
 		Com_Printf( "SV_MM_ParseResponse: Missing `player_info` section\n" );
 		return;
 	}
 
-	const char *login = sq_api->GetStringOrDefault( info_section, "login", "" );
-	if( !login || !*login ) {
+	ObjectReader infoReader( infoSection );
+	const char *login = infoReader.GetString( "login", "" );
+	if( !*login ) {
 		Com_Printf( "SV_MM_ParseResponse: Missing `login` field\n" );
 		return;
 	}
 
 	Q_strncpyz( cl->mm_login, login, sizeof( cl->mm_login ) );
 	if( !Info_SetValueForKey( cl->userinfo, "cl_mm_login", login ) ) {
+		// TODO: What to do in this case?
 		Com_Printf( "Failed to set infokey 'cl_mm_login' for player %s\n", login );
 	}
 
-	const char *mmflags = sq_api->GetStringOrDefault( root, "mmflags", "" );
-	if( mmflags && *mmflags ) {
+	const char *mmflags = query->GetRootString( "mmflags", "" );
+	if( *mmflags ) {
 		if( !Info_SetValueForKey( cl->userinfo, "mmflags", mmflags ) ) {
 			Com_Printf( "Failed to set infokey 'mmflags' for player %s\n", login );
 		}
@@ -328,27 +271,38 @@ static void sv_mm_clientconnect_done( stat_query_t *query, bool success, void *c
 
 	userinfo_changed = true;
 
-	stat_query_section_t *ratings_section = sq_api->GetSection( root, "ratings" );
-	if( ge && ratings_section ) {
-		int idx = 0;
-		stat_query_section_t *element = sq_api->GetArraySection( ratings_section, idx++ );
-		edict_t *ent = EDICT_NUM( ( cl - svs.clients ) + 1 );
-		while( element ) {
-			ge->AddRating( ent, sq_api->GetString( element, "gametype" ),
-						   (float)sq_api->GetNumber( element, "rating" ),
-						   (float)sq_api->GetNumber( element, "deviation" ) );
-			element = sq_api->GetArraySection( ratings_section, idx++ );
-		}
+	// Don't call the code for the "failure" path at scope exit
+	failureGuard.Suppress();
+
+	// Again this cries for optionals
+	cJSON *ratingsSection = rootReader.GetArray( "ratings" );
+	if( !ratingsSection || !ge ) {
+		return;
 	}
 
-	failureGuard.Suppress();
+	ArrayReader ratingsReader( ratingsSection );
+	edict_t *const ent = EDICT_NUM( ( cl - svs.clients ) + 1 );
+	while( !ratingsReader.IsDone() ) {
+		// This cries for optionals too
+		if( !ratingsReader.IsAtObject() ) {
+			Com_Printf( "Warning: an entry in ratings array is not a JSON object\n" );
+			break;
+		}
+		ObjectReader entryReader( ratingsReader.GetChildObject() );
+		const char *gametype = entryReader.GetString( "gametype" );
+		const double rating = entryReader.GetDouble( "rating" );
+		const double deviation = entryReader.GetDouble( "deviation" );
+		if( !gametype || std::isnan( rating ) || std::isnan( deviation ) ) {
+			Com_Printf( "Warning: an entry in ratings array is malformed\n" );
+			break;
+		}
+
+		ge->AddRating( ent, gametype, (float)rating, (float)deviation );
+		ratingsReader.Next();
+	}
 }
 
-mm_uuid_t SV_MM_ClientConnect( client_t *client, const netadr_t *address, char *userinfo, mm_uuid_t ticket, mm_uuid_t session_id ) {
-	stat_query_t *query;
-	client_done_context_t *context;
-	char uuid_buffer[UUID_BUFFER_SIZE];
-
+mm_uuid_t SV_MM_ClientConnect( client_t *client, const netadr_t *address, char *, mm_uuid_t ticket, mm_uuid_t session_id ) {
 	// return of -1 is not an error, it just marks a dummy local session
 	if( !sv_mm_initialized || !Uuid_IsValidSessionId( sv_mm_session ) ) {
 		return Uuid_FFFsUuid();
@@ -364,27 +318,21 @@ mm_uuid_t SV_MM_ClientConnect( client_t *client, const netadr_t *address, char *
 	}
 
 	// push a request
-	query = sq_api->CreateQuery( sv_ip->string, "/server/clientConnect", false );
-	if( query == NULL ) {
+	QueryObject *query = QueryObject::NewPostQuery( "/server/clientConnect", sv_ip->string );
+	if( !query ) {
 		return Uuid_ZeroUuid();
 	}
 
-	sq_api->SetField( query, MM_FORM_SERVER_SESSION, Uuid_ToString( uuid_buffer, sv_mm_session ) );
-	sq_api->SetField( query, MM_FORM_TICKET, Uuid_ToString( uuid_buffer, ticket ) );
-	sq_api->SetField( query, MM_FORM_CLIENT_SESSION, Uuid_ToString( uuid_buffer, session_id ) );
-	sq_api->SetField( query, MM_FORM_CLIENT_ADDRESS, NET_AddressToString( address ) );
-
-	context = ( client_done_context_t *)Mem_ZoneMalloc( sizeof( client_done_context_t ) );
-	context->session_id = session_id;
-	context->client = client;
-
-	sq_api->SetCallback( query, sv_mm_clientconnect_done, context );
-	sq_api->Send( query );
+	query->SetServerSession( sv_mm_session );
+	query->SetTicket( ticket );
+	query->SetClientSession( session_id );
+	query->SetClientAddress( NET_AddressToString( address ) );
+	query->SendDeletingOnCompletion( [=]( QueryObject *query ) { SV_MM_ClientConnectDone( query, client ); } );
 
 	return session_id;
 }
 
-void SV_MM_Frame( void ) {
+void SV_MM_Frame() {
 	int64_t time;
 
 	if( sv_mm_enable->modified ) {
@@ -416,109 +364,94 @@ void SV_MM_Frame( void ) {
 	}
 }
 
-bool SV_MM_Initialized( void ) {
+bool SV_MM_Initialized() {
 	return sv_mm_initialized;
 }
 
-
-static void sv_mm_logout_done( stat_query_t *query, bool success, void *customp ) {
-	Com_Printf( "SV_MM_Logout: Loggin off..\n" );
-
-	// ignore response-status and just mark us as logged-out
-	sv_mm_logout_semaphore = true;
-}
 
 /*
 * SV_MM_Logout
 */
 static void SV_MM_Logout( bool force ) {
-	stat_query_t *query;
-	int64_t timeout;
-	char uuid_buffer[UUID_BUFFER_SIZE];
-
 	if( !sv_mm_initialized || !Uuid_IsValidSessionId( sv_mm_session ) ) {
 		return;
 	}
 
-	query = sq_api->CreateQuery( sv_ip->string, "server/logout", false );
-	if( query == NULL ) {
+	QueryObject *query = QueryObject::NewPostQuery( "server/logout", sv_ip->string );
+	if( !query ) {
 		return;
 	}
 
 	sv_mm_logout_semaphore = false;
 
-	// TODO: pull the authkey out of cvar into file
-	sq_api->SetField( query, MM_FORM_SERVER_SESSION, Uuid_ToString( uuid_buffer, sv_mm_session ) );
-	sq_api->SetCallback( query, sv_mm_logout_done, NULL );
-	sq_api->Send( query );
+	query->SetServerSession( sv_mm_session );
+	query->SendDeletingOnCompletion( [=]( QueryObject *query ) {
+		Com_Printf( "SV_MM_Logout: Loggin off..\n" );
+		// ignore response-status and just mark us as logged-out
+		sv_mm_logout_semaphore = true;
+	});
 
-	if( force ) {
-		timeout = Sys_Milliseconds();
-		while( !sv_mm_logout_semaphore && Sys_Milliseconds() < ( timeout + MM_LOGOUT_TIMEOUT ) ) {
-			sq_api->Poll();
-
-			Sys_Sleep( 10 );
-		}
-
-		if( !sv_mm_logout_semaphore ) {
-			Com_Printf( "SV_MM_Logout: Failed to force logout\n" );
-		} else {
-			Com_Printf( "SV_MM_Logout: force logout successful\n" );
-		}
-
-		sv_mm_logout_semaphore = false;
-
-		// dont call this, we are coming from shutdown
-		// SV_MM_Shutdown( false );
+	if( !force ) {
+		return;
 	}
+
+	const auto startTime = Sys_Milliseconds();
+	while( !sv_mm_logout_semaphore && Sys_Milliseconds() < ( startTime + MM_LOGOUT_TIMEOUT ) ) {
+		QueryObject::Poll();
+
+		Sys_Sleep( 10 );
+	}
+
+	if( !sv_mm_logout_semaphore ) {
+		Com_Printf( "SV_MM_Logout: Failed to force logout\n" );
+	} else {
+		Com_Printf( "SV_MM_Logout: force logout successful\n" );
+	}
+
+	sv_mm_logout_semaphore = false;
+
+	// dont call this, we are coming from shutdown
+	// SV_MM_Shutdown( false );
 }
 
-/*
-* sv_mm_login_done
-* callback for login post request
-*/
-static void sv_mm_login_done( stat_query_t *query, bool success, void *customp ) {
+static QueryObject *sv_login_query = nullptr;
+
+static void SV_MM_LoginDone( QueryObject *query ) {
 	char uuid_buffer[UUID_BUFFER_SIZE];
 
 	sv_mm_initialized = false;
-	sv_login_query = NULL;
+	sv_login_query = nullptr;
 
-	if( !success ) {
+	if( !query->HasSucceeded() ) {
 		Com_Printf( "SV_MM_Login_Done: Error\n" );
 		Cvar_ForceSet( sv_mm_enable->name, "0" );
 		return;
 	}
 
-	Com_DPrintf( "SV_MM_Login: %s\n", sq_api->GetRawResponse( query ) );
+	Com_DPrintf( "SV_MM_Login: %s\n", query->RawResponse() );
 
 	ScopeGuard failureGuard([&]() {
 		Com_Printf( "SV_MM_Login: Failed, no session id\n" );
 		Cvar_ForceSet( sv_mm_enable->name, "0" );
 	});
 
-	/*
-	 * ch : JSON API
-	 * {
-	 *		status: [int], 0 on failure
-	 *		session_id: [uuid], present on success
-	 * }
-	 */
-	stat_query_section_t *root = sq_api->GetRoot( query );
-	if( !root ) {
+	if( !query->ResponseJsonRoot() ) {
 		Com_Printf( "SV_MM_Login: Failed to parse data\n" );
 		return;
 	}
 
-	const int status = (int)sq_api->GetNumberOrDefault( root, "status", 0 );
-	if( !status ) {
-		const char *error = sq_api->GetStringOrDefault( root, "error", "" );
-		if( error && *error ) {
+	const auto status = query->GetRootDouble( "status", 0.0 );
+	if( status == 0 ) {
+		const char *error = query->GetRootString( "error", "" );
+		if( *error ) {
 			Com_Printf( "SV_MM_Login: Request error at remote host: %s\n", error );
+		} else {
+			Com_Printf( "SV_MM_Login: Unspecified error at remote host\n" );
 		}
 		return;
 	}
 
-	const char *sessionString = sq_api->GetStringOrDefault( root, "session_id", "" );
+	const char *sessionString = query->GetRootString( "session_id", "" );
 	if( !Uuid_FromString( sessionString, &sv_mm_session ) ) {
 		Com_Printf( "SV_MM_Login: Failed to parse session string %s\n", sessionString );
 		return;
@@ -536,12 +469,15 @@ static void sv_mm_login_done( stat_query_t *query, bool success, void *customp )
 /*
 * SV_MM_Login
 */
-static bool SV_MM_Login( void ) {
-	stat_query_t *query;
-
-	if( sv_login_query != NULL || sv_mm_initialized ) {
+static bool SV_MM_Login() {
+	if( !sv_mm_initialized ) {
 		return false;
 	}
+
+	if( sv_login_query ) {
+		return false;
+	}
+
 	if( sv_mm_authkey->string[0] == '\0' ) {
 		Cvar_ForceSet( sv_mm_enable->name, "0" );
 		return false;
@@ -549,56 +485,47 @@ static bool SV_MM_Login( void ) {
 
 	Com_Printf( "SV_MM_Login: Creating query\n" );
 
-	query = sq_api->CreateQuery( sv_ip->string, "server/login", false );
-	if( query == NULL ) {
+	QueryObject *query = QueryObject::NewPostQuery( "server/login", sv_ip->string );
+	if( !query ) {
 		return false;
 	}
 
-	sq_api->SetField( query, MM_FORM_AUTH_KEY, sv_mm_authkey->string );
-	sq_api->SetField( query, MM_FORM_PORT, va( "%d", sv_port->integer ) );
-	sq_api->SetField( query, MM_FORM_SERVER_NAME, sv.configstrings[CS_HOSTNAME] );
-	sq_api->SetField( query, MM_FORM_SERVER_ADDRESS, sv_ip->string );
-	sq_api->SetField( query, MM_FORM_DEMOS_BASEURL, sv_uploads_demos_baseurl->string );
-	sq_api->SetCallback( query, sv_mm_login_done, NULL );
-	sq_api->Send( query );
+	query->SetAuthKey( sv_mm_authkey->string );
+	query->SetPort( va( "%d", sv_port->integer ) );
+	query->SetServerName( sv.configstrings[CS_HOSTNAME] );
+	query->SetServerAddress( sv_ip->string );
+	query->SetDemosBaseUrl( sv_uploads_demos_baseurl->string );
 
 	sv_login_query = query;
 
+	query->SendDeletingOnCompletion( [=]( QueryObject *q ) { SV_MM_LoginDone( q ); } );
 	return true;
 }
 
-/*
-* sv_mm_match_uuid_done
-* callback for match uuid fetching
-*/
-static void sv_mm_match_uuid_done( stat_query_t *query, bool success, void *customp ) {
-	stat_query_section_t *root;
+static QueryObject *sv_mm_match_uuid_fetch_query = nullptr;
 
+static void SV_MM_MatchUuidDone( QueryObject *query ) {
 	// set the repeat timer, which will be ignored in case we successfully parse the response
 	sv_mm_next_match_uuid_fetch = Sys_Milliseconds() + SV_MM_MATCH_UUID_FETCH_INTERVAL * 1000;
-	sv_mm_match_uuid_fetch_query = NULL;
+	sv_mm_match_uuid_fetch_query = nullptr;
 
-	if( !success ) {
+	if( !query->HasSucceeded() ) {
 		return;
 	}
 
-	Com_DPrintf( "SV_MM_GetMatchUUID: %s\n", sq_api->GetRawResponse( query ) );
+	Com_DPrintf( "SV_MM_GetMatchUUID: %s\n", query->RawResponse() );
 
-	/*
-	 * JSON API
-	 * {
-	 *		uuid: [string]
-	 * }
-	 */
-	root = sq_api->GetRoot( query );
-	if( root == NULL ) {
+	const cJSON *root = query->ResponseJsonRoot();
+	if( !root ) {
 		Com_Printf( "SV_MM_GetMatchUUID: Failed to parse data\n" );
-	} else {
-		Q_strncpyz( sv_mm_match_uuid, sq_api->GetString( root, "uuid" ), sizeof( sv_mm_match_uuid ) );
-		if( sv_mm_match_uuid_callback_fn ) {
-			// fire the callback function
-			sv_mm_match_uuid_callback_fn( sv_mm_match_uuid );
-		}
+		return;
+	}
+
+	const char *uuidString = cJSON_GetObjectItem( const_cast<cJSON *>(root), "uuid" )->valuestring;
+	Q_strncpyz( sv_mm_match_uuid, uuidString, UUID_BUFFER_SIZE );
+	if( sv_mm_match_uuid_callback_fn ) {
+		// fire the callback function
+		sv_mm_match_uuid_callback_fn( sv_mm_match_uuid );
 	}
 }
 
@@ -607,21 +534,21 @@ static void sv_mm_match_uuid_done( stat_query_t *query, bool success, void *cust
 *
 * Repeatedly query the matchmaker for match UUID until we get one.
 */
-static void SV_MM_GetMatchUUIDThink( void ) {
-	stat_query_t *query;
-	char uuid_buffer[UUID_BUFFER_SIZE];
-
+static void SV_MM_GetMatchUUIDThink() {
 	if( !sv_mm_initialized || !Uuid_IsValidSessionId( sv_mm_session ) ) {
 		return;
 	}
+
 	if( sv_mm_next_match_uuid_fetch > Sys_Milliseconds() ) {
 		// not ready yet
 		return;
 	}
-	if( sv_mm_match_uuid_fetch_query != NULL ) {
+
+	if( sv_mm_match_uuid_fetch_query ) {
 		// already in progress
 		return;
 	}
+
 	if( sv_mm_match_uuid[0] != '\0' ) {
 		// we have already queried the server
 		return;
@@ -630,16 +557,14 @@ static void SV_MM_GetMatchUUIDThink( void ) {
 	// ok, get it now!
 	Com_DPrintf( "SV_MM_GetMatchUUIDThink: Creating query\n" );
 
-	query = sq_api->CreateQuery( sv_ip->string, "server/matchUuid", false );
-	if( query == NULL ) {
+	QueryObject *query = QueryObject::NewPostQuery( "server/matchUuid", sv_ip->string );
+	if( !query ) {
 		return;
 	}
 
-	sq_api->SetField( query, MM_FORM_SERVER_SESSION, Uuid_ToString( uuid_buffer, sv_mm_session ) );
-	sq_api->SetCallback( query, sv_mm_match_uuid_done, NULL );
-	sq_api->Send( query );
-
+	query->SetServerSession( sv_mm_session );
 	sv_mm_match_uuid_fetch_query = query;
+	query->SendDeletingOnCompletion( [=]( QueryObject *q ) { SV_MM_MatchUuidDone( q ); } );
 }
 
 /*
@@ -652,7 +577,7 @@ void SV_MM_GetMatchUUID( void ( *callback_fn )( const char *uuid ) ) {
 	if( !sv_mm_initialized ) {
 		return;
 	}
-	if( sv_mm_match_uuid_fetch_query != NULL ) {
+	if( sv_mm_match_uuid_fetch_query ) {
 		// already in progress
 		return;
 	}
@@ -672,10 +597,9 @@ void SV_MM_GetMatchUUID( void ( *callback_fn )( const char *uuid ) ) {
 /*
 * SV_MM_Init
 */
-void SV_MM_Init( void ) {
+void SV_MM_Init() {
 	sv_mm_initialized = false;
 	sv_mm_session = Uuid_ZeroUuid();
-	sv_mm_localsession = 0;
 	sv_mm_last_heartbeat = 0;
 	sv_mm_logout_semaphore = false;
 
@@ -683,11 +607,8 @@ void SV_MM_Init( void ) {
 
 	sv_mm_match_uuid[0] = '\0';
 	sv_mm_next_match_uuid_fetch = Sys_Milliseconds();
-	sv_mm_match_uuid_fetch_query = NULL;
-	sv_mm_match_uuid_callback_fn = NULL;
-
-	StatQuery_Init();
-	sq_api = StatQuery_GetAPI();
+	sv_mm_match_uuid_fetch_query = nullptr;
+	sv_mm_match_uuid_callback_fn = nullptr;
 
 	/*
 	* create cvars
@@ -696,7 +617,6 @@ void SV_MM_Init( void ) {
 	*/
 	sv_mm_enable = Cvar_Get( "sv_mm_enable", "0", CVAR_ARCHIVE | CVAR_NOSET | CVAR_SERVERINFO );
 	sv_mm_loginonly = Cvar_Get( "sv_mm_loginonly", "0", CVAR_ARCHIVE | CVAR_SERVERINFO );
-	sv_mm_debug_reportbots = Cvar_Get( "sv_mm_debug_reportbots", "0", CVAR_CHEAT );
 
 	// this is used by game, but to pass it to client, we'll initialize it in sv
 	Cvar_Get( "sv_skillRating", va( "%.0f", MM_RATING_DEFAULT ), CVAR_READONLY | CVAR_SERVERINFO );
@@ -707,7 +627,7 @@ void SV_MM_Init( void ) {
 	/*
 	* login
 	*/
-	sv_login_query = NULL;
+	sv_login_query = nullptr;
 	//if( sv_mm_enable->integer )
 	//	SV_MM_Login();
 	sv_mm_enable->modified = true;
@@ -734,7 +654,4 @@ void SV_MM_Shutdown( bool logout ) {
 
 	sv_mm_initialized = false;
 	sv_mm_session = Uuid_ZeroUuid();
-
-	StatQuery_Shutdown();
-	sq_api = NULL;
 }

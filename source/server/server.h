@@ -23,6 +23,20 @@
 #include "../game/g_public.h"
 #include "../matchmaker/mm_rating.h"
 
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+
+#include <algorithm>
+#include <cstdlib>
+#include <cmath>
+#include <memory>
+#include <new>
+#include <utility>
+
 //=============================================================================
 
 #define MAX_MASTERS                     16 // max recipients for heartbeat packets
@@ -535,9 +549,13 @@ int SV_MM_GenerateLocalSession( void );
 
 // match report
 #include "../matchmaker/mm_common.h"
-struct stat_query_s *SV_MM_CreateQuery( const char *iface, const char *url, bool get );
-void SV_MM_SendQuery( stat_query_t *query );
+
+class QueryObject *SV_MM_NewGetQuery( const char *url );
+class QueryObject *SV_MM_NewPostQuery( const char *url );
+void SV_MM_DeleteQuery( class QueryObject *query );
+bool SV_MM_SendQuery( class QueryObject *query );
 void SV_MM_GameState( bool state );
+
 void SV_MM_GetMatchUUID( void ( *callback_fn )( const char *uuid ) );
 
 //

@@ -18,6 +18,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
+#ifndef WIN_INPUT_H_
+#define WIN_INPUT_H_
+
 #include <stdbool.h>
 
 // Raw input includes
@@ -156,3 +159,5 @@ void IN_RawInput_MouseRead( HANDLE in_device_handle );
 void IN_WinIME_Init( void );
 void IN_WinIME_AssociateContext( void );
 void IN_WinIME_Shutdown( void );
+
+#endif

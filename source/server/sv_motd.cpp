@@ -28,7 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 void SV_MOTD_SetMOTD( const char *motd ) {
 	char *pos;
-	size_t l = min( strlen( motd ), MAX_MOTD_LEN );
+	size_t l = std::min( strlen( motd ), (size_t)MAX_MOTD_LEN );
 
 	if( l == 0 ) {
 		if( svs.motd ) {

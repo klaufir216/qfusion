@@ -643,7 +643,8 @@ void VID_SetProcessDPIAware( void ) {
 
 	user32Dll = LoadLibrary( "user32.dll" );
 	if( user32Dll ) {
-		BOOL( WINAPI * pSetProcessDPIAware )( void ) = ( void * )GetProcAddress( user32Dll, "SetProcessDPIAware" );
+		typedef BOOL ( WINAPI *SETPROCESSDPIAWAREPROC )();
+		auto pSetProcessDPIAware = (SETPROCESSDPIAWAREPROC)( (void *)GetProcAddress( user32Dll, "SetProcessDPIAware" ) );
 		if( pSetProcessDPIAware ) {
 			pSetProcessDPIAware();
 		}

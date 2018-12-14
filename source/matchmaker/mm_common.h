@@ -40,15 +40,8 @@ void MM_PasswordWrite( const char *user, const char *password );
 // returns password as static string
 const char *MM_PasswordRead( const char *user );
 
-char ** MM_ParseResponse( wswcurl_req *req, int *argc );
-void MM_FreeResponse( char **argv );
-
-void MM_Init( void );
-void MM_Shutdown( void );
-void MM_Frame( const int realmsec );
-
-void StatQuery_Init( void );
-void StatQuery_Shutdown( void );
-stat_query_api_t *StatQuery_GetAPI( void );
+void MM_Init();
+void MM_Shutdown();
+void MM_Frame( int realmsec );
 
 #endif

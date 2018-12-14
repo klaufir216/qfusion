@@ -21,6 +21,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "server.h"
 #include "../matchmaker/mm_common.h"
 
+#include <algorithm>
+
 typedef struct sv_master_s {
 	netadr_t address;
 	bool steam;
@@ -1060,9 +1062,9 @@ bool SV_SteamServerQuery( const char *s, const socket_t *socket, const netadr_t 
 		MSG_WriteString( &msg, gamedir );
 		MSG_WriteString( &msg, gamename );
 		MSG_WriteInt16( &msg, 0 ); // app ID specified later
-		MSG_WriteUint8( &msg, min( players, 99 ) );
-		MSG_WriteUint8( &msg, min( maxclients, 99 ) );
-		MSG_WriteUint8( &msg, min( bots, 99 ) );
+		MSG_WriteUint8( &msg, std::min( players, 99 ) );
+		MSG_WriteUint8( &msg, std::min( maxclients, 99 ) );
+		MSG_WriteUint8( &msg, std::min( bots, 99 ) );
 		MSG_WriteUint8( &msg, ( dedicated && dedicated->integer ) ? 'd' : 'l' );
 		MSG_WriteUint8( &msg, STEAMQUERY_OS );
 		MSG_WriteUint8( &msg, Cvar_String( "password" )[0] ? 1 : 0 );
@@ -1178,7 +1180,7 @@ bool SV_SteamServerQuery( const char *s, const socket_t *socket, const netadr_t 
 					 "\\version\\%i.%i.0.0"
 					 "\\product\\%s\n",
 					 challenge,
-					 min( players, 99 ), min( maxclients, 99 ), min( bots, 99 ),
+					 std::min( players, 99 ), std::min( maxclients, 99 ), std::min( bots, 99 ),
 					 gamedir, sv.mapname,
 					 Cvar_String( "password" )[0] ? 1 : 0, STEAMQUERY_OS,
 					 sv_public->integer ? 0 : 1,

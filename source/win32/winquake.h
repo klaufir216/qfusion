@@ -38,7 +38,7 @@ enum {
 	MWHEEL_UNKNOWN,
 	MWHEEL_DINPUT,
 	MWHEEL_WM
-} mwheel_type;
+};
 
 extern HINSTANCE global_hInstance;
 

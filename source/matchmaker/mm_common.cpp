@@ -26,12 +26,6 @@ cvar_t *mm_url;
 
 static bool mm_initialized = false;
 
-//==================================================
-
-
-
-//==================================================
-
 // returns static internal string
 static const char *MM_PasswordFilename( const char *user ) {
 	static char filename[MAX_STRING_CHARS];
@@ -91,127 +85,10 @@ void MM_PasswordWrite( const char *user, const char *password ) {
 	Com_DPrintf( "MM_PasswordWrite: wrote %s\n", filename );
 }
 
-//==================================
-
-// returns list of tokens and sets *argc into number of tokens
-// you need to Mem_TempFree( ret[0] ) ; Mem_TempFree( ret )
-char ** MM_ParseResponse( wswcurl_req *req, int *argc ) {
-	size_t respSize;
-	char *buffer, *realBuffer, *p, *end, **tokens;
-	int numTokens, startOfs, endToken;
-
-	if( argc ) {
-		*argc = 0;
-	}
-
-	wswcurl_getsize( req, &respSize );
-	if( !respSize ) {
-		return 0;
-	}
-
-	// read the response string
-	buffer = (char *)Mem_TempMalloc( respSize + 1 );
-	respSize = wswcurl_read( req, buffer, respSize );
-	buffer[respSize] = '\0';
-
-	Com_DPrintf( "MM_ParseResponse: Parsing string\n%s\n", buffer );
-
-	// count the number of tokens (could this be done in 1 pass?)
-	p = buffer;
-	end = buffer + respSize;
-	numTokens = 0;
-	startOfs = 0;
-	while( p < end ) {
-		// skip whitespace
-		while( p < end && *p <= ' ' )
-			p++;
-
-		if( p >= end ) {
-			break;
-		}
-
-		if( !numTokens ) {
-			startOfs = p - buffer;
-		}
-
-		numTokens++;
-
-		// skip the token
-		while( p < end && *p > ' ' )
-			p++;
-	}
-
-	// fail
-	if( !numTokens ) {
-		if( argc ) {
-			*argc = 0;
-		}
-		Mem_TempFree( buffer );
-		return NULL;
-	}
-
-	if( argc ) {
-		*argc = numTokens;
-	}
-	tokens = (char **)Mem_TempMalloc( ( numTokens + 1 ) * sizeof( char* ) );
-
-	// allocate the actual buffer that we are going to return
-	if( startOfs > 0 ) {
-		realBuffer = (char *)Mem_TempMalloc( ( respSize - startOfs ) + 1 );
-		memcpy( realBuffer, buffer + startOfs, respSize - startOfs );
-		Mem_TempFree( buffer );
-		buffer = realBuffer;
-		respSize -= startOfs;
-		buffer[respSize] = '\0';
-	}
-
-	// 2nd pass, mark all tokens
-	p = buffer;
-	end = buffer + respSize;
-	endToken = numTokens;
-	numTokens = 0;
-	while( p < end && numTokens < endToken ) {
-		// we made the buffer point into the first character
-		// so we can shuffle this loop a little
-		tokens[numTokens++] = p;
-
-		// skip the token
-		while( p < end && *p > ' ' )
-			p++;
-
-		if( p >= end ) {
-			break;
-		}
-
-		// skip whitespace
-		while( p < end && *p <= ' ' )
-			*p++ = '\0';
-
-		Com_DPrintf( "MM_ParseResponse: parsed token %s\n", tokens[numTokens - 1] );
-	}
-	*p = '\0';  // we left room for 1 character
-	tokens[numTokens] = 0;
-
-	return tokens;
+void MM_Frame( int ) {
 }
 
-// free the result from mm_parseResponse2
-void MM_FreeResponse( char **argv ) {
-	if( argv ) {
-		if( argv[0] ) {
-			Mem_TempFree( argv[0] );
-		}
-		Mem_TempFree( argv );
-	}
-}
-
-//==================================
-
-void MM_Frame( const int realmsec ) {
-
-}
-
-void MM_Init( void ) {
+void MM_Init() {
 	mm_initialized = false;
 
 	mm_url = Cvar_Get( "mm_url", APP_MATCHMAKER_URL, CVAR_ARCHIVE | CVAR_NOSET );
@@ -219,7 +96,7 @@ void MM_Init( void ) {
 	mm_initialized = true;
 }
 
-void MM_Shutdown( void ) {
+void MM_Shutdown() {
 	mm_url = NULL;
 	mm_initialized = false;
 }

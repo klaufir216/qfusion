@@ -286,14 +286,23 @@ static inline struct angelwrap_api_s *trap_asGetAngelExport( void ) {
 }
 
 // Matchmaking
-static inline struct stat_query_api_s *trap_GetStatQueryAPI( void ) {
-	return GAME_IMPORT.GetStatQueryAPI();
+
+inline class QueryObject *trap_MM_NewGetQuery( const char *url ) {
+	return GAME_IMPORT.MM_NewGetQuery( url );
 }
 
-static inline void trap_MM_SendQuery( struct stat_query_s *query ) {
+inline class QueryObject *trap_MM_NewPostQuery( const char *url ) {
+	return GAME_IMPORT.MM_NewPostQuery( url );
+}
+
+inline void trap_MM_DeleteQuery( class QueryObject *query ) {
+	return GAME_IMPORT.MM_DeleteQuery( query );
+}
+
+inline void trap_MM_SendQuery( class QueryObject *query ) {
 	GAME_IMPORT.MM_SendQuery( query );
 }
 
-static inline void trap_MM_GameState( bool state ) {
+inline void trap_MM_GameState( bool state ) {
 	GAME_IMPORT.MM_GameState( state == true ? true : false );
 }

@@ -392,22 +392,6 @@ static void PF_MemFree( void *data, const char *filename, int fileline ) {
 	_Mem_Free( data, MEMPOOL_GAMEPROGS, 0, filename, fileline );
 }
 
-/*
-* PF_StatQuery_GetAPI
-*
-* Overrides CreateQuery entry with proxy function.
-*/
-static stat_query_api_t *PF_StatQuery_GetAPI( void ) {
-	static stat_query_api_t api;
-	stat_query_api_t *p;
-
-	p = StatQuery_GetAPI();
-	api = *p;
-	api.CreateQuery = SV_MM_CreateQuery;
-
-	return &api;
-}
-
 //==============================================
 
 /*
@@ -443,7 +427,7 @@ static void SV_LocateEntities( struct edict_s *edicts, int edict_size, int num_e
 	sv.gi.edict_size = edict_size;
 	sv.gi.num_edicts = num_edicts;
 	sv.gi.max_edicts = max_edicts;
-	sv.gi.max_clients = min( num_edicts, sv_maxclients->integer );
+	sv.gi.max_clients = std::min( num_edicts, sv_maxclients->integer );
 }
 
 /*
@@ -551,7 +535,9 @@ void SV_InitGameProgs( void ) {
 
 	import.asGetAngelExport = Com_asGetAngelExport;
 
-	import.GetStatQueryAPI = PF_StatQuery_GetAPI;
+	import.MM_NewGetQuery = SV_MM_NewGetQuery;
+	import.MM_NewPostQuery = SV_MM_NewPostQuery;
+	import.MM_DeleteQuery = SV_MM_DeleteQuery;
 	import.MM_SendQuery = SV_MM_SendQuery;
 	import.MM_GameState = SV_MM_GameState;
 

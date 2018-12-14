@@ -13,9 +13,9 @@ char *Sys_GetClipboardData( void ) {
 		HANDLE hClipboardData;
 
 		if( ( hClipboardData = GetClipboardData( CF_UNICODETEXT ) ) != 0 ) {
-			if( ( cliptext = GlobalLock( hClipboardData ) ) != 0 ) {
+			if( ( cliptext = (WCHAR *)GlobalLock( hClipboardData ) ) != 0 ) {
 				utf8size = WideCharToMultiByte( CP_UTF8, 0, cliptext, -1, NULL, 0, NULL, NULL );
-				utf8text = Q_malloc( utf8size );
+				utf8text = (char *)Q_malloc( utf8size );
 				WideCharToMultiByte( CP_UTF8, 0, cliptext, -1, utf8text, utf8size, NULL, NULL );
 				GlobalUnlock( hClipboardData );
 			}
@@ -52,7 +52,7 @@ bool Sys_SetClipboardData( const char *data ) {
 	}
 
 	// lock the handle and copy the text to the buffer
-	lptstrCopy = GlobalLock( hglbCopy );
+	lptstrCopy = (LPWSTR)GlobalLock( hglbCopy );
 
 	uFormat = CF_UNICODETEXT;
 	MultiByteToWideChar( CP_UTF8, 0, cliptext, -1, lptstrCopy, size );
