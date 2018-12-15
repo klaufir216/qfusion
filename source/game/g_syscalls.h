@@ -38,7 +38,7 @@ static inline void trap_Error( const char *msg ) {
 	GAME_IMPORT.Error( msg );
 }
 
-static inline void trap_GameCmd( struct edict_s *ent, const char *cmd ) {
+static inline void trap_GameCmd( const struct edict_s *ent, const char *cmd ) {
 	GAME_IMPORT.GameCmd( ent, cmd );
 }
 

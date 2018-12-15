@@ -81,7 +81,7 @@ typedef struct {
 #endif
 
 	// server commands sent to clients
-	void ( *GameCmd )( edict_t *ent, const char *cmd );
+	void ( *GameCmd )( const edict_t *ent, const char *cmd );
 
 	// config strings hold all the index strings,
 	// and misc data like audio track and gridsize.

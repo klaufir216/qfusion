@@ -1056,7 +1056,7 @@ static bool G_VoteMuteValidate( callvotedata_t *vote, bool first ) {
 // chat mute
 static void G_VoteMutePassed( callvotedata_t *vote ) {
 	if( edict_t *ent = G_Vote_GetValidDeferredVoteTarget( vote ) ) {
-		ent->r.client->muted |= 1;
+		ChatHandlersChain::Instance()->Mute( ent );
 		ent->r.client->level.stats.AddToEntry( "muted_count", 1 );
 	}
 }
@@ -1068,7 +1068,7 @@ static bool G_VoteUnmuteValidate( callvotedata_t *vote, bool first ) {
 // chat unmute
 static void G_VoteUnmutePassed( callvotedata_t *vote ) {
 	if( edict_t *ent = G_Vote_GetValidDeferredVoteTarget( vote ) ) {
-		ent->r.client->muted &= ~1;
+		ChatHandlersChain::Instance()->Unmute( ent );
 	}
 }
 

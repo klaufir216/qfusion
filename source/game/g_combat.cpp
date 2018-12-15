@@ -215,7 +215,7 @@ static float G_CheckArmor( edict_t *ent, float damage, int dflags ) {
 		return 0.0f;
 	}
 
-	maxsave = min( damage, client->resp.armor / g_armor_degradation->value );
+	maxsave = std::min( damage, client->resp.armor / g_armor_degradation->value );
 
 	if( maxsave <= 0.0f ) {
 		return 0.0f;
@@ -807,9 +807,9 @@ void G_RadiusDamage( edict_t *inflictor, edict_t *attacker, cplane_t *plane, edi
 
 		G_SplashFrac4D( ENTNUM( ent ), inflictor->s.origin, radius, pushDir, &kickFrac, &dmgFrac, timeDelta );
 
-		damage = max( 0, mindamage + ( ( maxdamage - mindamage ) * dmgFrac ) );
-		stun = max( 0, minstun + ( ( maxstun - minstun ) * dmgFrac ) );
-		knockback = max( 0, minknockback + ( ( maxknockback - minknockback ) * kickFrac ) );
+		damage = std::max( 0.0f, mindamage + ( ( maxdamage - mindamage ) * dmgFrac ) );
+		stun = std::max( 0.0f, minstun + ( ( maxstun - minstun ) * dmgFrac ) );
+		knockback = std::max( 0.0f, minknockback + ( ( maxknockback - minknockback ) * kickFrac ) );
 
 		// weapon jumps hack : when knockback on self, use strong weapon definition
 		if( ent == attacker && ent->r.client ) {

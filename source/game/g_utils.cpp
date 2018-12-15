@@ -893,7 +893,7 @@ void G_InitMover( edict_t *ent ) {
 		}
 
 		i /= 4;
-		i = min( i, 255 );
+		i = std::min( i, 255 );
 
 		r = ent->color[0];
 		if( r <= 1.0 ) {
@@ -1015,7 +1015,7 @@ int G_PlayerGender( edict_t *player ) {
 *
 * NULL sends to all the message to all clients
 */
-void G_PrintMsg( edict_t *ent, const char *format, ... ) {
+void G_PrintMsg( const edict_t *ent, const char *format, ... ) {
 	char msg[MAX_STRING_CHARS];
 	va_list argptr;
 	char *s, *p;
@@ -1044,7 +1044,7 @@ void G_PrintMsg( edict_t *ent, const char *format, ... ) {
 	}
 }
 
-void G_PrintChasersf( edict_t *self, const char *format, ... ) {
+void G_PrintChasersf( const edict_t *self, const char *format, ... ) {
 	char msg[1024];
 	va_list argptr;
 	edict_t *ent;
@@ -1069,7 +1069,7 @@ void G_PrintChasersf( edict_t *self, const char *format, ... ) {
 *
 * NULL sends the message to all clients
 */
-void G_ChatMsg( edict_t *ent, edict_t *who, bool teamonly, const char *format, ... ) {
+void G_ChatMsg( const edict_t *ent, const edict_t *who, bool teamonly, const char *format, ... ) {
 	char msg[1024];
 	va_list argptr;
 	char *s, *p;
@@ -1129,7 +1129,7 @@ void G_ChatMsg( edict_t *ent, edict_t *who, bool teamonly, const char *format, .
 *
 * NULL sends to all the message to all clients
 */
-void G_CenterPrintMsg( edict_t *ent, const char *format, ... ) {
+void G_CenterPrintMsg( const edict_t *ent, const char *format, ... ) {
 	char msg[1024];
 	char cmd[MAX_STRING_CHARS];
 	va_list argptr;
@@ -1169,7 +1169,7 @@ void G_CenterPrintMsg( edict_t *ent, const char *format, ... ) {
 *
 * NULL sends to all the message to all clients
 */
-void G_CenterPrintFormatMsg( edict_t *ent, int numVargs, const char *format, ... ) {
+void G_CenterPrintFormatMsg( const edict_t *ent, int numVargs, const char *format, ... ) {
 	int i;
 	char cmd[MAX_STRING_CHARS];
 	char arg_fmt[MAX_TOKEN_CHARS];

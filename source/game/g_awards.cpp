@@ -26,11 +26,21 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define LB_TIMEOUT_FOR_COMBO    200
 #define GUNBLADE_TIMEOUT_FOR_COMBO  400
 
-void G_PlayerAward( edict_t *ent, const char *awardMsg ) {
+void G_PlayerAward( const edict_t *ent, const char *awardMsg ) {
 	char cmd[MAX_STRING_CHARS];
 
 	//asdasd
 	if( !awardMsg || !awardMsg[0] || !ent->r.client ) {
+		return;
+	}
+
+	// Check this before announcement!
+	// The same test is put in StatsowFacade::AddAward()
+	// but it cuts off just saving awards in stats.
+	// Having redundant checks won't harm.
+	// Moreover its sufficient to check this at StatsowFacade level
+	// for meta-awards as they aren't announced.
+	if( ChatHandlersChain::Instance()->SkipStatsForClient( ent ) ) {
 		return;
 	}
 
@@ -59,7 +69,7 @@ void G_PlayerAward( edict_t *ent, const char *awardMsg ) {
 	}
 }
 
-void G_PlayerMetaAward( edict_t *ent, const char *awardMsg ) {
+void G_PlayerMetaAward( const edict_t *ent, const char *awardMsg ) {
 	/*
 	* ch : meta-award is an award that isn't announced but
 	* it is sent to MM

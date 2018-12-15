@@ -732,6 +732,7 @@ void G_RunFrame( unsigned int msec, int64_t serverTime ) {
 
 	G_CallVotes_Think();
 
+	ChatHandlersChain::Instance()->Frame();
 	StatsowFacade::Instance()->Frame();
 
 	if( GS_MatchPaused() ) {

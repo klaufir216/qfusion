@@ -132,7 +132,7 @@ static int PF_GetClientState( int numClient ) {
 * Sends the server command to clients.
 * If ent is NULL the command will be sent to all connected clients
 */
-static void PF_GameCmd( edict_t *ent, const char *cmd ) {
+static void PF_GameCmd( const edict_t *ent, const char *cmd ) {
 	int i;
 	client_t *client;
 

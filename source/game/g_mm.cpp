@@ -458,22 +458,61 @@ void StatsowFacade::ClearEntries() {
 	clientEntriesHead = nullptr;
 }
 
-void StatsowFacade::DiscardMatchReport( const char *reason ) {
-	// TODO: Print it to clients as well...
-	G_Printf( S_COLOR_YELLOW "%s. Discarding match report...\n", reason );
+void StatsowFacade::OnClientHadPlaytime( const gclient_t *client ) {
+	if( isDiscarded ) {
+		return;
+	}
+
+	if( !sv_mm_enable->integer ) {
+		isDiscarded = true;
+		return;
+	}
+
+	// TODO: Did we forget something else? What if sv_mm_enable is true but the session is not valid?
+	if( !GS_MMCompatible() ) {
+		isDiscarded = true;
+		return;
+	}
+
+	if( GS_RaceGametype() ) {
+		return;
+	}
+
+	const char *reason = nullptr;
+	const edict_t *ent = game.edicts + ENTNUM( client );
+	// Check whether it's a bot first (they do not have valid session ids as well)
+	if( ent->ai ) {
+		if( AI_GetType( ent->ai ) == AI_ISBOT ) {
+			reason = "A bot had a play-time";
+		}
+		// The report is still valid if it's an AI but not a bot.
+		// TODO: Are logged frags valid as well in this case?
+	} else {
+		if( !client->mm_session.IsValidSessionId() ) {
+			reason = va( "An anonymous player `%s` had a play-time", client->netname );
+		}
+	}
+
+	if( !reason ) {
+		return;
+	}
+
+	// Print to everybody
+	G_PrintMsg( nullptr, S_COLOR_YELLOW "%s. Discarding match report...\n", reason );
 
 	// Do not hold no longer useful data
 	ClearEntries();
 	// TODO:!!!!!!!!
 	// TODO:!!!!!!!!
 	// TODO:!!!!!!!! clear other data as well
+
+	isDiscarded = true;
 }
 
 void StatsowFacade::OnClientDisconnected( edict_t *ent ) {
-	// always report in RACE mode
 	if( GS_RaceGametype() ) {
-		// TODO: "AddRaceReport(void)" ?
-		AddPlayerReport( ent, GS_MatchState() == MATCH_STATE_POSTMATCH );
+		// Force sending race reports if somebody disconnects
+		SendReport();
 		return;
 	}
 
@@ -482,14 +521,18 @@ void StatsowFacade::OnClientDisconnected( edict_t *ent ) {
 	}
 
 	const bool isMatchOver = GS_MatchState() == MATCH_STATE_POSTMATCH;
+	// If not in match-time and not in post-match ignore this
 	if( !isMatchOver && ( GS_MatchState() != MATCH_STATE_PLAYTIME ) ) {
 		return;
 	}
 
+	ChatHandlersChain::Instance()->OnClientDisconnected( ent );
 	AddPlayerReport( ent, isMatchOver );
 }
 
 void StatsowFacade::OnClientJoinedTeam( edict_t *ent, int newTeam ) {
+	ChatHandlersChain::Instance()->OnClientJoinedTeam( ent, newTeam );
+
 	if( ent->r.client->team == TEAM_SPECTATOR ) {
 		return;
 	}
@@ -511,13 +554,9 @@ void StatsowFacade::AddPlayerReport( edict_t *ent, bool final ) {
 	if( !ent->r.inuse ) {
 		return;
 	}
-	// TODO: check if MM is enabled
 
-	if( GS_RaceGametype() ) {
-		// force sending report when someone disconnects
-		SendReport();
-		return;
-	}
+	// This code path should not be entered by race gametypes
+	assert( !GS_RaceGametype() );
 
 	if( !GS_MMCompatible() ) {
 		return;
@@ -533,40 +572,20 @@ void StatsowFacade::AddPlayerReport( edict_t *ent, bool final ) {
 		return;
 	}
 
-	if( ( ent->r.svflags & SVF_FAKECLIENT ) ) {
-		if( ent->r.client->level.stats.had_playtime ) {
-			DiscardMatchReport( "A bot had some playtime" );
-		}
-		return;
-	}
+	constexpr const char *format = "StatsowFacade::AddPlayerReport(): %s" S_COLOR_WHITE " (%s)\n";
+	G_Printf( format, cl->netname, cl->mm_session.ToString( uuid_buffer ) );
 
-	if( !cl->mm_session.IsValidSessionId() ) {
-		if( ent->r.client->level.stats.had_playtime ) {
-			DiscardMatchReport( va( "A client %s without valid session id had some playtime", cl->netname ) );
-		}
-		return;
-	}
-
-	// check merge situation
-	ClientEntry *entry;
-	for( entry = clientEntriesHead; entry; entry = entry->next ) {
-		if( entry->mm_session == cl->mm_session ) {
-			break;
-		}
-	}
-
-	// debug :
-	G_Printf( "Stats::AddPlayerReport(): %s" S_COLOR_WHITE " (%s)\n", cl->netname, cl->mm_session.ToString( uuid_buffer ) );
-
+	ClientEntry *entry = FindEntryById( cl->mm_session );
 	if( entry ) {
 		AddToExistingEntry( ent, final, entry );
-		return;
+	} else {
+		entry = NewPlayerEntry( ent, final );
+		// put it to the list
+		entry->next = clientEntriesHead;
+		clientEntriesHead = entry;
 	}
 
-	entry = NewPlayerEntry( ent, final );
-	// put it to the list
-	entry->next = clientEntriesHead;
-	clientEntriesHead = entry;
+	ChatHandlersChain::Instance()->AddToReportStats( ent, &entry->respectStats );
 }
 
 void StatsowFacade::AddToExistingEntry( edict_t *ent, bool final, ClientEntry *e ) {
@@ -626,6 +645,22 @@ void StatsowFacade::MergeAwards( StatsSequence<gameaward_t> &to, StatsSequence<g
 	from.Clear();
 }
 
+StatsowFacade::ClientEntry *StatsowFacade::FindEntryById( const mm_uuid_t &playerSessionId ) {
+	for( ClientEntry *entry = clientEntriesHead; entry; entry = entry->next ) {
+		if( entry->mm_session == playerSessionId ) {
+			return entry;
+		}
+	}
+	return nullptr;
+}
+
+StatsowFacade::RespectStats *StatsowFacade::FindRespectStatsById( const mm_uuid_t &playerSessionId ) {
+	if( ClientEntry *entry = FindEntryById( playerSessionId ) ) {
+		return &entry->respectStats;
+	}
+	return nullptr;
+}
+
 StatsowFacade::ClientEntry *StatsowFacade::NewPlayerEntry( edict_t *ent, bool final ) {
 	auto *cl = ent->r.client;
 
@@ -642,9 +677,15 @@ StatsowFacade::ClientEntry *StatsowFacade::NewPlayerEntry( edict_t *ent, bool fi
 }
 
 void StatsowFacade::AddMetaAward( const edict_t *ent, const char *awardMsg ) {
-	if( GS_MatchState() == MATCH_STATE_PLAYTIME ) {
-		AddAward( ent, awardMsg );
+	if( GS_MatchState() != MATCH_STATE_PLAYTIME ) {
+		return;
 	}
+
+	if( ChatHandlersChain::Instance()->SkipStatsForClient( ent ) ) {
+		return;
+	}
+
+	AddAward( ent, awardMsg );
 }
 
 void StatsowFacade::AddAward( const edict_t *ent, const char *awardMsg ) {
@@ -653,6 +694,10 @@ void StatsowFacade::AddAward( const edict_t *ent, const char *awardMsg ) {
 	}
 
 	if( GS_MatchState() != MATCH_STATE_PLAYTIME && GS_MatchState() != MATCH_STATE_POSTMATCH ) {
+		return;
+	}
+
+	if( ChatHandlersChain::Instance()->SkipStatsForClient( ent ) ) {
 		return;
 	}
 
@@ -690,6 +735,7 @@ void StatsowFacade::AddFrag( const edict_t *attacker, const edict_t *victim, int
 	// ch : frag log
 	auto *const stats = &attacker->r.client->level.stats;
 	loggedFrag_t *const lfrag = stats->fragsSequence.New();
+	// TODO: Are these ID's required to be valid? What if there are monsters (not bots)?
 	lfrag->attacker = attacker->r.client->mm_session;
 	lfrag->victim = victim->r.client->mm_session;
 
@@ -796,29 +842,7 @@ void StatsowFacade::SendRegularReport() {
 	writer << "players" << '[';
 	for( ClientEntry *cl = clientEntriesHead; cl; cl = cl->next ) {
 		writer << '{';
-		{
-			writer << "session_id"  << cl->mm_session;
-			writer << "name"        << cl->netname;
-			writer << "score"       << cl->stats.score;
-			writer << "time_played" << cl->timePlayed;
-			writer << "is_final"    << ( cl->final ? 1 : 0 );
-
-			writer << "various_stats" << '{';
-			{
-				for( const auto &keyAndValue: cl->stats ) {
-					writer << keyAndValue.first << keyAndValue.second;
-				}
-			}
-			writer << '}';
-
-			if( teamGame != 0 ) {
-				writer << "team" << cl->team - TEAM_ALPHA;
-			}
-
-			AddPlayerAwards( writer, cl );
-			AddPlayerWeapons( writer, cl, weapnames );
-			AddPlayerLogFrags( writer, cl );
-		}
+		cl->WriteToReport( writer, teamGame != 0, weapnames );
 		writer << '}';
 	}
 	writer << ']';
@@ -827,10 +851,56 @@ void StatsowFacade::SendRegularReport() {
 	trap_MM_SendQuery( query );
 }
 
-void StatsowFacade::AddPlayerAwards( QueryWriter &writer, ClientEntry *cl ) {
+void StatsowFacade::ClientEntry::WriteToReport( QueryWriter &writer, bool teamGame, const char **weaponNames ) {
+	writer << "session_id"  << mm_session;
+	writer << "name"        << netname;
+	writer << "score"       << stats.score;
+	writer << "time_played" << timePlayed;
+	writer << "is_final"    << ( final ? 1 : 0 );
+	if( teamGame != 0 ) {
+		writer << "team" << team - TEAM_ALPHA;
+	}
+
+	writer << "respect_stats" << '{';
+	{
+		writer << "status";
+		if( respectStats.hasViolatedCodex ) {
+			writer << "violated";
+		} else if( respectStats.hasIgnoredCodex ) {
+			writer << "ignored";
+		} else {
+			writer << "followed";
+			writer << "token_stats" << '{';
+			{
+				for( const auto &keyAndValue: respectStats ) {
+					writer << keyAndValue.first << keyAndValue.second;
+				}
+			}
+			writer << '}';
+		}
+	}
+
+	if( respectStats.hasViolatedCodex || respectStats.hasIgnoredCodex ) {
+		return;
+	}
+
+	writer << "various_stats" << '{';
+	{
+		for( const auto &keyAndValue: stats ) {
+			writer << keyAndValue.first << keyAndValue.second;
+		}
+	}
+	writer << '}';
+
+	AddAwards( writer );
+	AddWeapons( writer, weaponNames );
+	AddFrags( writer );
+}
+
+void StatsowFacade::ClientEntry::AddAwards( QueryWriter &writer ) {
 	writer << "awards" << '[';
 	{
-		for( const gameaward_t &award: cl->stats.awardsSequence ) {
+		for( const gameaward_t &award: stats.awardsSequence ) {
 			writer << '{';
 			{
 				writer << "name"  << award.name;
@@ -842,10 +912,10 @@ void StatsowFacade::AddPlayerAwards( QueryWriter &writer, ClientEntry *cl ) {
 	writer << ']';
 }
 
-void StatsowFacade::AddPlayerLogFrags( QueryWriter &writer, ClientEntry *cl ) {
+void StatsowFacade::ClientEntry::AddFrags( QueryWriter &writer ) {
 	writer << "log_frags" << '[';
 	{
-		for( const loggedFrag_t &frag: cl->stats.fragsSequence ) {
+		for( const loggedFrag_t &frag: stats.fragsSequence ) {
 			writer << '{';
 			{
 				writer << "victim" << frag.victim;
@@ -871,13 +941,12 @@ static inline double ComputeAccuracy( int hits, int shots ) {
 	return ( std::min( (int)( std::floor( ( 100.0f * ( hits ) ) / ( (float)( shots ) ) + 0.5f ) ), 99 ) );
 }
 
-void StatsowFacade::AddPlayerWeapons( QueryWriter &writer, ClientEntry *cl, const char **weaponNames ) {
-	const auto *stats = &cl->stats;
+void StatsowFacade::ClientEntry::AddWeapons( QueryWriter &writer, const char **weaponNames ) {
 	int i;
 
 	// first pass calculate the number of weapons, see if we even need this section
 	for( i = 0; i < ( AMMO_TOTAL - WEAP_TOTAL ); i++ ) {
-		if( stats->accuracy_shots[i] > 0 ) {
+		if( stats.accuracy_shots[i] > 0 ) {
 			break;
 		}
 	}
@@ -895,7 +964,7 @@ void StatsowFacade::AddPlayerWeapons( QueryWriter &writer, ClientEntry *cl, cons
 		for( j = 0; j < AMMO_WEAK_GUNBLADE - WEAP_TOTAL; j++ ) {
 			const int weak = j + ( AMMO_WEAK_GUNBLADE - WEAP_TOTAL );
 			// Don't submit unused weapons
-			if( stats->accuracy_shots[j] == 0 && stats->accuracy_shots[weak] == 0 ) {
+			if( stats.accuracy_shots[j] == 0 && stats.accuracy_shots[weak] == 0 ) {
 				continue;
 			}
 
@@ -906,24 +975,24 @@ void StatsowFacade::AddPlayerWeapons( QueryWriter &writer, ClientEntry *cl, cons
 				writer << "various_stats" << '{';
 				{
 					// STRONG
-					int hits = stats->accuracy_hits[j];
-					int shots = stats->accuracy_shots[j];
+					int hits = stats.accuracy_hits[j];
+					int shots = stats.accuracy_shots[j];
 
 					writer << "strong_hits"   << hits;
 					writer << "strong_shots"  << shots;
 					writer << "strong_acc"    << ComputeAccuracy( hits, shots );
-					writer << "strong_dmg"    << stats->accuracy_damage[j];
-					writer << "strong_frags"  << stats->accuracy_frags[j];
+					writer << "strong_dmg"    << stats.accuracy_damage[j];
+					writer << "strong_frags"  << stats.accuracy_frags[j];
 
 					// WEAK
-					hits = stats->accuracy_hits[weak];
-					shots = stats->accuracy_shots[weak];
+					hits = stats.accuracy_hits[weak];
+					shots = stats.accuracy_shots[weak];
 
 					writer << "weak_hits"   << hits;
 					writer << "weak_shots"  << shots;
 					writer << "weak_acc"    << ComputeAccuracy( hits, shots );
-					writer << "weak_dmg"    << stats->accuracy_damage[weak];
-					writer << "weak_frags"  << stats->accuracy_frags[weak];
+					writer << "weak_dmg"    << stats.accuracy_damage[weak];
+					writer << "weak_frags"  << stats.accuracy_frags[weak];
 				}
 				writer << '}';
 			}
@@ -1037,3 +1106,475 @@ void QueryObject::FailWith( const char *format, ... ) {
 	trap_Error( buffer );
 }
 #endif
+
+RespectHandler::RespectHandler() {
+	for( int i = 0; i < MAX_CLIENTS; ++i ) {
+		entries[i].ent = game.edicts + i + 1;
+	}
+	Reset();
+}
+
+void RespectHandler::Reset() {
+	for( ClientEntry &e: entries ) {
+		e.Reset();
+	}
+
+	matchStartedAt = -1;
+	lastFrameMatchState = MATCH_STATE_NONE;
+}
+
+void RespectHandler::Frame() {
+	const auto matchState = GS_MatchState();
+	// This is not 100% correct but is sufficient for message checks
+	if( matchState == MATCH_STATE_PLAYTIME ) {
+		if( lastFrameMatchState != MATCH_STATE_PLAYTIME ) {
+			matchStartedAt = level.time;
+		}
+	}
+
+	if( !GS_RaceGametype() ) {
+		for( int i = 0; i < gs.maxclients; ++i ) {
+			entries[i].CheckBehaviour( matchStartedAt );
+		}
+	}
+
+	lastFrameMatchState = matchState;
+}
+
+bool RespectHandler::HandleMessage( const edict_t *ent, const char *message ) {
+	// Race is another world...
+	if( GS_RaceGametype() ) {
+		return false;
+	}
+
+	// Allow public chatting in timeouts
+	if( GS_MatchPaused() ) {
+		return false;
+	}
+
+	const auto matchState = GS_MatchState();
+	// Ignore until countdown
+	if( matchState < MATCH_STATE_COUNTDOWN ) {
+		return false;
+	}
+
+	return entries[ENTNUM( ent ) - 1].HandleMessage( message );
+}
+
+void RespectHandler::ClientEntry::Reset() {
+	warnedAt = 0;
+	firstJoinedTeamAt = 0;
+	std::fill_n( firstSaidAt, 0, NUM_TOKENS );
+	std::fill_n( lastSaidAt, 0, NUM_TOKENS );
+	std::fill_n( numSaidTokens, 0, NUM_TOKENS );
+	saidBefore = false;
+	saidAfter = false;
+	hasTakenCountdownHint = false;
+	hasTakenStartHint = false;
+	hasTakenFinalHint = false;
+	hasIgnoredCodex = false;
+	hasViolatedCodex = false;
+}
+
+bool RespectHandler::ClientEntry::HandleMessage( const char *message ) {
+	// If has already violated the Codex
+	if( hasViolatedCodex ) {
+		return false;
+	}
+
+	// Now check for RnS tokens...
+	if( CheckForTokens( message ) ) {
+		return false;
+	}
+
+	const char *nickName = ent->r.client->netname;
+	const char *warning = S_COLOR_GREY "Less talk, let's play!";
+	if( GS_MatchState() < MATCH_STATE_PLAYTIME ) {
+		// Print a warning only to the player
+		PrintToClientScreen( "%s", warning );
+		return false;
+	}
+
+	// Never warned (at start of the level)
+	if( !warnedAt ) {
+		warnedAt = level.time;
+		PrintToClientScreen( "%s", warning );
+		// Let the message be printed by default facilities
+		return false;
+	}
+
+	const int64_t millisSinceLastWarn = level.time - warnedAt;
+	// Don't warn again for occasional flood
+	if( millisSinceLastWarn < 1000 ) {
+		// Swallow messages silently
+		return true;
+	}
+
+	// Allow speaking occasionally once per 5 minutes
+	if( millisSinceLastWarn > 5 * 60 * 1000 ) {
+		warnedAt = level.time;
+		PrintToClientScreen( "%s", warning );
+		return false;
+	}
+
+	hasViolatedCodex = true;
+	// Print the message first
+	G_ChatMsg( nullptr, ent, false, "%s", message );
+	// Then announce
+	AnnounceMisconductBehaviour( "violated" );
+	// Interrupt handing of the message
+	return true;
+}
+
+void RespectHandler::ClientEntry::AnnounceMisconductBehaviour( const char *action ) {
+	// Ignore bots.
+	// We plan to add R&S bot behaviour but do not currently want to touch the game module
+	if( ent->r.svflags & SVF_FAKECLIENT ) {
+		return;
+	}
+
+	const char *subject = S_COLOR_WHITE "Respect and Sportsmanship Codex";
+
+	const char *outcome;
+	if( !StatsowFacade::Instance()->IsMatchReportDiscarded() ) {
+		outcome = S_COLOR_RED "No awards, no rating gain";
+	} else {
+		outcome = S_COLOR_RED "No awards given";
+	}
+
+	constexpr const char *format = S_COLOR_RED "BOOM! " S_COLOR_WHITE "%s" S_COLOR_RED " has %s %s! %s!\n";
+	G_PrintMsg( nullptr, format, ent->r.client->netname, action, subject, outcome );
+
+	PrintToClientScreen( S_COLOR_RED "You have %s R&S Codex...", action );
+}
+
+void RespectHandler::ClientEntry::PrintToClientScreen( const char *format, ... ) {
+	char formatBuffer[MAX_STRING_CHARS];
+	char commandBuffer[MAX_STRING_CHARS];
+
+	va_list va;
+	va_start( va, format );
+	Q_vsnprintfz( formatBuffer, sizeof( formatBuffer ), format, va );
+	va_end( va );
+
+	// Make this message appear as an award at client-side
+	Q_snprintfz( commandBuffer, sizeof( commandBuffer ), "aw \"%s\"", formatBuffer );
+	trap_GameCmd( ent, commandBuffer );
+}
+
+// We still can't use C++17, here's a hack
+class string_view {
+	const char *s;
+	const size_t len;
+public:
+	string_view( const char *s_ ) noexcept : s( s_ ), len( strlen( s ) ) {}
+	const char *data() const { return s; }
+	size_t size() const { return len; }
+};
+
+class RespectTokensRegistry {
+	static const std::array<const string_view *, 10> ALIASES;
+
+	static_assert( RespectHandler::NUM_TOKENS == 10, "" );
+public:
+	// For players staying in game during the match
+	static constexpr auto SAY_AT_START_TOKEN_NUM = 2;
+	static constexpr auto SAY_AT_END_TOKEN_NUM = 3;
+	// For players joining or quitting mid-game
+	static constexpr auto SAY_AT_JOINING_TOKEN_NUM = 0;
+	static constexpr auto SAY_AT_QUITTING_TOKEN_NUM = 1;
+
+	/**
+	 * Finds a number of a token (a number of a token aliases group) the supplied string matches.
+	 * @param p a pointer to a string data. Should not point to a white-space. A successful match advances this token.
+	 * @return a number of token (of a token aliases group), a negative value on failure.
+	 */
+	static int MatchByToken( const char **p );
+
+	static const char *TokenForNum( int num ) {
+		assert( (unsigned )num < ALIASES.size() );
+		return ALIASES[num][0].data();
+	}
+};
+
+// Every chain must end with an empty string that acts as a terminator.
+// Otherwise a runtime crash due to wrong loop upper bounds is expected.
+
+static const string_view hiAliases[] = { "hi", "hello", "" };
+static const string_view byeAliases[] = { "bb", "bye", "" };
+static const string_view glhfAliases[] = { "glhf", "gl", "hf", "" };
+static const string_view ggAliases[] = { "ggs", "gg", "bgs", "bg", "" };
+static const string_view plzAliases[] = { "plz", "please", "" };
+static const string_view tksAliases[] = { "tks", "thanks", "" };
+static const string_view sozAliases[] = { "soz", "sorry", "" };
+static const string_view smiley1Aliases[] = { ":)", "n1", "" };
+static const string_view smiley2Aliases[] = { ":(", "np", "" };
+static const string_view lolAliases[] = { "lol", "" };
+
+const std::array<const string_view *, 10> RespectTokensRegistry::ALIASES = {
+	hiAliases, byeAliases, glhfAliases, ggAliases, plzAliases,
+	tksAliases, sozAliases, smiley1Aliases, smiley2Aliases, lolAliases
+};
+
+int RespectTokensRegistry::MatchByToken( const char **p ) {
+	int tokenNum = 0;
+	for( const string_view *tokenAliases: ALIASES ) {
+		for( const string_view *alias = tokenAliases; alias->size(); alias++ ) {
+			if( !Q_strnicmp( alias->data(), *p, alias->size() ) ) {
+				*p += alias->size();
+				return tokenNum;
+			}
+		}
+		tokenNum++;
+	}
+	return -1;
+}
+
+bool RespectHandler::ClientEntry::CheckForTokens( const char *message ) {
+	// Do not modify tokens count immediately
+	// Either this routine fails completely or stats for all tokens get updated
+	int numFoundTokens[NUM_TOKENS];
+	std::fill_n( numFoundTokens, 0, NUM_TOKENS );
+
+	const int64_t levelTime = level.time;
+
+	const char *p = message;
+	for(;; ) {
+		while( ::isspace( *p ) ) {
+			p++;
+		}
+		if( !*p ) {
+			break;
+		}
+		int tokenNum = RespectTokensRegistry::MatchByToken( &p );
+		if( tokenNum < 0 ) {
+			return false;
+		}
+		numFoundTokens[tokenNum]++;
+	}
+
+	for( int tokenNum = 0; tokenNum < NUM_TOKENS; ++tokenNum ) {
+		int numTokens = numFoundTokens[tokenNum];
+		if( !numTokens ) {
+			continue;
+		}
+		this->numSaidTokens[tokenNum] += numTokens;
+		this->lastSaidAt[tokenNum] = levelTime;
+	}
+
+	return true;
+}
+
+void RespectHandler::ClientEntry::CheckBehaviour( const int64_t matchStartTime ) {
+	if( !ent->r.inuse ) {
+		return;
+	}
+
+	if( !ent->r.client->level.stats.had_playtime ) {
+		return;
+	}
+
+	if( saidBefore && saidAfter ) {
+		return;
+	}
+
+	const auto levelTime = level.time;
+	const auto matchState = GS_MatchState();
+
+	if( matchState == MATCH_STATE_COUNTDOWN ) {
+		// If has just said "glhf"
+		const int tokenNum = RespectTokensRegistry::SAY_AT_START_TOKEN_NUM;
+		if( levelTime - lastSaidAt[tokenNum] < 64 ) {
+			saidBefore = true;
+		}
+		if( !hasTakenCountdownHint ) {
+			PrintToClientScreen( S_COLOR_CYAN "Say `%s` please!", RespectTokensRegistry::TokenForNum( tokenNum ) );
+			hasTakenCountdownHint = true;
+		}
+		return;
+	}
+
+	if( matchState == MATCH_STATE_PLAYTIME ) {
+		if( saidBefore ) {
+			return;
+		}
+
+		int tokenNum;
+		int64_t countdownStartTime;
+		// Say "glhf" being in-game from the beginning or "hi" when joining
+		if( firstJoinedTeamAt <= matchStartTime ) {
+			countdownStartTime = matchStartTime;
+			tokenNum = RespectTokensRegistry::SAY_AT_START_TOKEN_NUM;
+		} else {
+			countdownStartTime = firstJoinedTeamAt;
+			tokenNum = RespectTokensRegistry::SAY_AT_JOINING_TOKEN_NUM;
+		}
+
+		if( levelTime - lastSaidAt[tokenNum] < 64 ) {
+			saidBefore = true;
+			return;
+		}
+
+		if( levelTime - countdownStartTime < 1500 ) {
+			return;
+		}
+
+		if( !hasTakenStartHint ) {
+			PrintToClientScreen( S_COLOR_CYAN "Say `%s` please!", RespectTokensRegistry::TokenForNum( tokenNum ) );
+			hasTakenStartHint = true;
+			return;
+		}
+
+		if( !hasIgnoredCodex && levelTime - countdownStartTime > 10000 ) {
+			// The misconduct behaviour is going to be detected inevitably.
+			// This is just to prevent massive console spam at the same time.
+			if( random() > 0.95f ) {
+				hasIgnoredCodex = true;
+				AnnounceMisconductBehaviour( "ignored" );
+			}
+			return;
+		}
+	}
+
+	if( matchState != MATCH_STATE_POSTMATCH ) {
+		return;
+	}
+
+	if( levelTime - lastSaidAt[RespectTokensRegistry::SAY_AT_END_TOKEN_NUM] < 64 ) {
+		saidAfter = true;
+		if( saidBefore && !hasViolatedCodex ) {
+			G_PlayerAward( ent, S_COLOR_CYAN "Fair play!" );
+			G_PrintMsg( ent, "Your stats and awards have been confirmed!\n" );
+		}
+	}
+
+	if( !saidAfter && saidBefore && !hasViolatedCodex ) {
+		// TODO: Say this hint 1 second after the match
+		if( !hasTakenFinalHint ) {
+			// Say "gg" at the end regardless of being in-game from the beginning or joining mid-game
+			PrintToClientScreen( S_COLOR_CYAN "Say `gg` please!" );
+			hasTakenFinalHint = true;
+		}
+		return;
+	}
+
+	if( !hasTakenFinalHint ) {
+		if( hasIgnoredCodex || hasViolatedCodex ) {
+			PrintToClientScreen( "Be nice next time please..." );
+		}
+		hasTakenFinalHint = true;
+	}
+}
+
+void RespectHandler::ClientEntry::OnClientDisconnected() {
+	if( GS_MatchState() != MATCH_STATE_PLAYTIME ) {
+		return;
+	}
+
+	if( !ent->r.client->level.stats.had_playtime ) {
+		return;
+	}
+
+	// Skip bots currently
+	if( ent->r.svflags & SVF_FAKECLIENT ) {
+		return;
+	}
+
+	if( !saidBefore || hasViolatedCodex ) {
+		return;
+	}
+
+	constexpr int sayAtQuitting = RespectTokensRegistry::SAY_AT_QUITTING_TOKEN_NUM;
+	constexpr int sayAtEnd = RespectTokensRegistry::SAY_AT_END_TOKEN_NUM;
+
+	int64_t lastByeTokenTime = -1;
+	if( lastSaidAt[sayAtQuitting] > lastByeTokenTime ) {
+		lastByeTokenTime = lastSaidAt[sayAtQuitting];
+	} else if( lastSaidAt[sayAtQuitting] > lastByeTokenTime ) {
+		lastByeTokenTime = lastSaidAt[sayAtQuitting];
+	}
+
+	// Check whether its substantially overridden by other tokens
+	for( int i = 0; i < NUM_TOKENS; ++i ) {
+		if( i == sayAtEnd || i == sayAtQuitting ) {
+			continue;
+		}
+		if( lastSaidAt[i] > lastByeTokenTime + 3000 ) {
+			lastByeTokenTime = -1;
+			break;
+		}
+	}
+
+	if( warnedAt < lastByeTokenTime ) {
+		saidAfter = true;
+		return;
+	}
+
+	assert( !saidAfter );
+	const char *outcome = "";
+	if( !StatsowFacade::Instance()->IsMatchReportDiscarded() ) {
+		outcome = " No rating progress, no awards saved!";
+	}
+
+	const char *format = "%s" S_COLOR_YELLOW " chickened and left the game.%s\n";
+	G_Printf( format, ent->r.client->netname, outcome );
+}
+
+void RespectHandler::ClientEntry::OnClientJoinedTeam( int newTeam ) {
+	if( newTeam == TEAM_SPECTATOR ) {
+		return;
+	}
+
+	if( GS_MatchState() > MATCH_STATE_PLAYTIME ) {
+		return;
+	}
+
+	if( !firstJoinedTeamAt ) {
+		firstJoinedTeamAt = level.time;
+	}
+
+	// Check whether there is already Codex violation recorded for the player during this match
+	mm_uuid_t clientSessionId = this->ent->r.client->mm_session;
+	if( !clientSessionId.IsValidSessionId() ) {
+		return;
+	}
+
+	auto *respectStats = StatsowFacade::Instance()->FindRespectStatsById( clientSessionId );
+	if( !respectStats ) {
+		return;
+	}
+
+	this->hasViolatedCodex = respectStats->hasViolatedCodex;
+	this->hasIgnoredCodex = respectStats->hasIgnoredCodex;
+}
+
+void RespectHandler::ClientEntry::AddToReportStats( StatsowFacade::RespectStats *reportedStats ) {
+	if( reportedStats->hasViolatedCodex ) {
+		return;
+	}
+
+	if( hasViolatedCodex ) {
+		reportedStats->Clear();
+		reportedStats->hasViolatedCodex = true;
+		reportedStats->hasIgnoredCodex = hasIgnoredCodex;
+		return;
+	}
+
+	if( hasIgnoredCodex ) {
+		reportedStats->Clear();
+		reportedStats->hasIgnoredCodex = true;
+		return;
+	}
+
+	if( reportedStats->hasIgnoredCodex ) {
+		return;
+	}
+
+	for( int i = 0; i < NUM_TOKENS; ++i ) {
+		if( !numSaidTokens[i] ) {
+			continue;
+		}
+		const char *token = RespectTokensRegistry::TokenForNum( i );
+		reportedStats->AddToEntry( token, numSaidTokens[i] );
+	}
+}

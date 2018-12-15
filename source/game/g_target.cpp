@@ -175,8 +175,8 @@ void SP_target_explosion( edict_t *self ) {
 	self->use = use_target_explosion;
 	self->r.svflags = SVF_NOCLIENT;
 
-	self->projectileInfo.maxDamage = max( self->dmg, 1 );
-	self->projectileInfo.minDamage = min( self->dmg, 1 );
+	self->projectileInfo.maxDamage = std::max( self->dmg, 1 );
+	self->projectileInfo.minDamage = std::min( self->dmg, 1 );
 	self->projectileInfo.maxKnockback = self->projectileInfo.maxDamage;
 	self->projectileInfo.minKnockback = self->projectileInfo.minDamage;
 	self->projectileInfo.stun = self->projectileInfo.maxDamage * 100;

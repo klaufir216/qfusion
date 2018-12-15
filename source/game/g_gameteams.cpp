@@ -1210,12 +1210,12 @@ void G_Say_Team( edict_t *who, const char *inmsg, bool checkflood ) {
 	char current_color[3];
 
 	if( who->s.team != TEAM_SPECTATOR && ( !GS_TeamBasedGametype() || GS_InvidualGameType() ) ) {
-		Cmd_Say_f( who, false, true );
+		Cmd_Say_f( who, false );
 		return;
 	}
 
 	if( checkflood ) {
-		if( CheckFlood( who, true ) ) {
+		if( ChatHandlersChain::Instance()->DetectFlood( who, true ) ) {
 			return;
 		}
 	}
@@ -1231,7 +1231,7 @@ void G_Say_Team( edict_t *who, const char *inmsg, bool checkflood ) {
 	if( who->s.team == TEAM_SPECTATOR ) {
 		// if speccing, also check for non-team flood
 		if( checkflood ) {
-			if( CheckFlood( who, false ) ) {
+			if( ChatHandlersChain::Instance()->DetectFlood( who, false ) ) {
 				return;
 			}
 		}
@@ -1239,17 +1239,6 @@ void G_Say_Team( edict_t *who, const char *inmsg, bool checkflood ) {
 		G_ChatMsg( NULL, who, true, "%s", msg );
 		return;
 	}
-
-#ifdef AUTHED_SAY
-	if( sv_mm_enable->integer && who->r.client && who->r.client->mm_session <= 0 ) {
-		// unauthed players are only allowed to chat to public at non play-time
-		// they are allowed to team-chat at any time
-		if( GS_MatchState() == MATCH_STATE_PLAYTIME ) {
-			G_PrintMsg( who, "%s", S_COLOR_YELLOW "You must authenticate to be able to chat with other players during the match.\n" );
-			return;
-		}
-	}
-#endif
 
 	Q_strncpyz( current_color, S_COLOR_WHITE, sizeof( current_color ) );
 

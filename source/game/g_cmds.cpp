@@ -19,6 +19,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 #include "g_local.h"
 
+#include "../qalgo/SingletonHolder.h"
+
 /*
 * G_Teleport
 *
@@ -518,15 +520,7 @@ static void Cmd_Spectators_f( edict_t *ent ) {
 	Cmd_PlayersExt_f( ent, true );
 }
 
-bool CheckFlood( edict_t *ent, bool teamonly ) {
-	int i;
-	gclient_t *client;
-
-	assert( ent != NULL );
-
-	client = ent->r.client;
-	assert( client != NULL );
-
+void ChatHandlersChain::Frame() {
 	if( g_floodprotection_messages->modified ) {
 		if( g_floodprotection_messages->integer < 0 ) {
 			trap_Cvar_Set( "g_floodprotection_messages", "0" );
@@ -560,6 +554,28 @@ bool CheckFlood( edict_t *ent, bool teamonly ) {
 		}
 		g_floodprotection_penalty->modified = false;
 	}
+
+	if( respectHandler.lastFrameMatchState == MATCH_STATE_PLAYTIME && GS_MatchState() == MATCH_STATE_POSTMATCH ) {
+		// Unlock to say `gg` postmatch
+		muteFilter.Reset();
+		floodFilter.Reset();
+	}
+
+	respectHandler.Frame();
+}
+
+bool FloodFilter::DetectFlood( const edict_t *ent, bool teamonly ) {
+	// TODO: Rewrite so the client do not actually have to maintain its flood state
+
+	int i;
+	gclient_t *client;
+
+	assert( ent != NULL );
+
+	client = ent->r.client;
+	assert( client != NULL );
+
+
 
 	// old protection still active
 	if( !teamonly || g_floodprotection_team->integer ) {
@@ -619,7 +635,7 @@ static void Cmd_CoinToss_f( edict_t *ent ) {
 		G_PrintMsg( ent, "You can only toss coins during warmup or timeouts\n" );
 		return;
 	}
-	if( CheckFlood( ent, false ) ) {
+	if( ChatHandlersChain::Instance()->DetectFlood( ent, false ) ) {
 		return;
 	}
 
@@ -645,33 +661,77 @@ static void Cmd_CoinToss_f( edict_t *ent ) {
 	G_PrintMsg( NULL, S_COLOR_YELLOW "COINTOSS %s: " S_COLOR_WHITE "It was %s! %s " S_COLOR_WHITE "tossed a coin and " S_COLOR_RED "lost!\n", upper, qtails ? "heads" : "tails", ent->r.client->netname );
 }
 
+static SingletonHolder<ChatHandlersChain> chatHandlersChainHolder;
+
+void ChatHandlersChain::Init() {
+	::chatHandlersChainHolder.Init();
+}
+
+void ChatHandlersChain::Shutdown() {
+	::chatHandlersChainHolder.Shutdown();
+}
+
+ChatHandlersChain *ChatHandlersChain::Instance() {
+	return ::chatHandlersChainHolder.Instance();
+}
+
+void ChatHandlersChain::Reset() {
+	authFilter.Reset();
+	muteFilter.Reset();
+	floodFilter.Reset();
+	respectHandler.Reset();
+}
+
+void ChatHandlersChain::ResetForClient( int clientNum ) {
+	authFilter.ResetForClient( clientNum );
+	muteFilter.ResetForClient( clientNum );
+	floodFilter.ResetForClient( clientNum );
+	respectHandler.ResetForClient( clientNum );
+}
+
+bool ChatHandlersChain::HandleMessage( const edict_t *ent, const char *message ) {
+	// We want to call overridden methods directly just to avoid pointless virtual invocations.
+	// Filters are applied in order of their priority.
+	if( authFilter.HandleMessage( ent, message ) || muteFilter.HandleMessage( ent, message ) ) {
+		return true;
+	}
+	return floodFilter.HandleMessage( ent, message ) || respectHandler.HandleMessage( ent, message );
+}
+
+void ChatAuthFilter::Reset() {
+	authOnly = sv_mm_enable->integer && trap_Cvar_Value( "sv_mm_chat_loginonly" ) != 0;
+}
+
+bool ChatAuthFilter::HandleMessage( const edict_t *ent, const char * ) {
+	if( !authOnly ) {
+		return false;
+	}
+
+	if( GS_MatchState() != MATCH_STATE_PLAYTIME ) {
+		return false;
+	}
+
+	// Allow talking in timeouts
+	if( GS_MatchPaused() ) {
+		return false;
+	}
+
+	if( ent->r.client->mm_session.IsValidSessionId() ) {
+		return false;
+	}
+
+	// unauthed players are only allowed to chat to public at non play-time
+	G_PrintMsg( ent, S_COLOR_YELLOW "Register at Warsow.net and log in to say public chat messages during a match\n" );
+	return true;
+}
+
 /*
 * Cmd_Say_f
 */
-void Cmd_Say_f( edict_t *ent, bool arg0, bool checkflood ) {
+void Cmd_Say_f( edict_t *ent, bool arg0 ) {
 	char *p;
 	char text[2048];
 	size_t arg0len = 0;
-
-#ifdef AUTHED_SAY
-	if( sv_mm_enable->integer && ent->r.client && ent->r.client->mm_session <= 0 ) {
-		// unauthed players are only allowed to chat to public at non play-time
-		if( GS_MatchState() == MATCH_STATE_PLAYTIME ) {
-			G_PrintMsg( ent, "%s", S_COLOR_YELLOW "You must authenticate to be able to communicate to other players during the match.\n" );
-			return;
-		}
-	}
-#endif
-
-	if( checkflood ) {
-		if( CheckFlood( ent, false ) ) {
-			return;
-		}
-	}
-
-	if( ent->r.client && ( ent->r.client->muted & 1 ) ) {
-		return;
-	}
 
 	if( trap_Cmd_Argc() < 2 && !arg0 ) {
 		return;
@@ -699,6 +759,10 @@ void Cmd_Say_f( edict_t *ent, bool arg0, bool checkflood ) {
 	// don't let text be too long for malicious reasons
 	text[arg0len + ( MAX_CHAT_BYTES - 1 )] = 0;
 
+	if( ChatHandlersChain::Instance()->HandleMessage( ent, text ) ) {
+		return;
+	}
+
 	G_ChatMsg( NULL, ent, false, "%s", text );
 }
 
@@ -706,7 +770,7 @@ void Cmd_Say_f( edict_t *ent, bool arg0, bool checkflood ) {
 * Cmd_SayCmd_f
 */
 static void Cmd_SayCmd_f( edict_t *ent ) {
-	Cmd_Say_f( ent, false, true );
+	Cmd_Say_f( ent, false );
 }
 
 /*
@@ -720,7 +784,7 @@ static void Cmd_SayTeam_f( edict_t *ent ) {
 * Cmd_Join_f
 */
 static void Cmd_Join_f( edict_t *ent ) {
-	if( CheckFlood( ent, false ) ) {
+	if( ChatHandlersChain::Instance()->DetectFlood( ent, false ) ) {
 		return;
 	}
 

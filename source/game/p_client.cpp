@@ -1101,7 +1101,7 @@ void ClientUserinfoChanged( edict_t *ent, char *userinfo ) {
 	// set name, it's validated and possibly changed first
 	Q_strncpyz( oldname, cl->netname, sizeof( oldname ) );
 	G_SetName( ent, Info_ValueForKey( userinfo, "name" ) );
-	if( oldname[0] && Q_stricmp( oldname, cl->netname ) && !CheckFlood( ent, false ) ) {
+	if( oldname[0] && Q_stricmp( oldname, cl->netname ) && !ChatHandlersChain::Instance()->DetectFlood( ent, false ) ) {
 		G_PrintMsg( NULL, "%s%s is now known as %s%s\n", oldname, S_COLOR_WHITE, cl->netname, S_COLOR_WHITE );
 	}
 	if( !Info_SetValueForKey( userinfo, "name", cl->netname ) ) {
@@ -1312,7 +1312,8 @@ void ClientDisconnect( edict_t *ent, const char *reason ) {
 		return;
 	}
 
-    StatsowFacade::Instance()->OnClientDisconnected( ent );
+	StatsowFacade::Instance()->OnClientDisconnected( ent );
+	ChatHandlersChain::Instance()->ResetForClient( ENTNUM( ent ) - 1 );
 
 	for( team = TEAM_PLAYERS; team < GS_MAX_TEAMS; team++ )
 		G_Teams_UnInvitePlayer( team, ent );
@@ -1623,6 +1624,7 @@ void ClientThink( edict_t *ent, usercmd_t *ucmd, int timeDelta ) {
 	//
 	if( client->ps.pmove.pm_type == PM_NORMAL ) {
 		client->level.stats.had_playtime = true;
+		StatsowFacade::Instance()->OnClientHadPlaytime( client );
 	}
 
 	// generating plrkeys (optimized for net communication)
