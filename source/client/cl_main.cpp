@@ -896,8 +896,6 @@ void CL_Disconnect( const char *message ) {
 
 	CL_RestartMedia();
 
-	CL_Mumble_Unlink();
-
 	CL_ClearState();
 	CL_SetClientState( CA_DISCONNECTED );
 
@@ -1626,8 +1624,6 @@ void CL_RequestNextDownload( void ) {
 	// load client game module
 	CL_GameModule_Init();
 	CL_AddReliableCommand( va( "begin %i\n", precache_spawncount ) );
-
-	CL_Mumble_Link();
 }
 
 /*
@@ -2936,8 +2932,6 @@ void CL_Init( void ) {
 	CL_MM_Init();
 
 	ML_Init();
-
-	CL_Mumble_Init();
 }
 
 /*
@@ -2972,7 +2966,6 @@ void CL_Shutdown( void ) {
 	CL_GameModule_Shutdown();
 	CL_SoundModule_Shutdown( true );
 	CL_ShutdownInput();
-	CL_Mumble_Shutdown();
 	L10n_Shutdown();
 	VID_Shutdown();
 
