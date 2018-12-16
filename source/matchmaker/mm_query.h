@@ -110,7 +110,7 @@ public:
  * The {@code FailWith} call should be defined in modules appropriately as well.
  */
 class QueryObject {
-	friend class QueryWriter;
+	friend class JsonWriter;
 	friend class NodeReader;
 	friend class ObjectReader;
 	friend class ArrayReader;
@@ -310,6 +310,11 @@ public:
 		return responseRoot;
 	}
 
+	cJSON *ResponseJsonRoot() {
+		CheckStatusOnGet( "a JSON response root" );
+		return responseRoot;
+	}
+
 	const char *RawResponse() {
 		CheckStatusOnGet( "a raw response" );
 		return rawResponse;
@@ -422,7 +427,7 @@ inline double ObjectReader::GetDouble( const char *field, double defaultValue ) 
 	return AsDouble( f, field );
 }
 
-class alignas( 8 )QueryWriter {
+class alignas( 8 )JsonWriter {
 	friend class CompoundWriter;
 	friend class ObjectWriter;
 	friend class ArrayWriter;
@@ -477,9 +482,9 @@ class alignas( 8 )QueryWriter {
 	 * actually attaches values to the current top JSON node.
 	 */
 	class CompoundWriter {
-		friend class QueryWriter;
+		friend class JsonWriter;
 	protected:
-		QueryWriter *const parent;
+		JsonWriter *const parent;
 		cJSON *const section;
 
 		int64_t CheckPrecisionLoss( int64_t value ) {
@@ -491,7 +496,7 @@ class alignas( 8 )QueryWriter {
 			return value;
 		}
 	public:
-		CompoundWriter( QueryWriter *parent_, cJSON *section_ )
+		CompoundWriter( JsonWriter *parent_, cJSON *section_ )
 			: parent( parent_ ), section( section_ ) {}
 
 		virtual	~CompoundWriter() = default;
@@ -512,14 +517,16 @@ class alignas( 8 )QueryWriter {
 
 		const char *CheckFieldName( const char *tag ) {
 			if( !fieldName ) {
-				QueryObject::FailWith( "QueryWriter::ObjectWriter::operator<<(%s): "
+				QueryObject::FailWith( "JsonWriter::ObjectWriter::operator<<(%s): "
 				    "A field name has not been set before supplying a value", tag );
 			}
 			return fieldName;
 		}
 	public:
-		ObjectWriter( QueryWriter *parent_, cJSON *section_ )
-			: CompoundWriter( parent_, section_ ), fieldName( nullptr ) {}
+		ObjectWriter( JsonWriter *parent_, cJSON *section_ )
+			: CompoundWriter( parent_, section_ ), fieldName( nullptr ) {
+			assert( section_->type == cJSON_Object );
+		}
 
 		void operator<<( const char *nameOrValue ) override {
 			if( !fieldName ) {
@@ -578,8 +585,10 @@ class alignas( 8 )QueryWriter {
 	 */
 	class ArrayWriter: public CompoundWriter {
 	public:
-		ArrayWriter( QueryWriter *parent_, cJSON *section_ )
-			: CompoundWriter( parent_, section_ ) {}
+		ArrayWriter( JsonWriter *parent_, cJSON *section_ )
+			: CompoundWriter( parent_, section_ ) {
+			assert( section_->type == cJSON_Array );
+		}
 
 		void operator<<( const char *nameOrValue ) override {
 			cJSON_AddItemToArray( section, cJSON_CreateString( nameOrValue ) );
@@ -630,7 +639,7 @@ class alignas( 8 )QueryWriter {
 
 		alignas( 8 ) uint8_t storage[STACK_SIZE * ENTRY_SIZE];
 
-		QueryWriter *parent;
+		JsonWriter *parent;
 		int topOfStack;
 
 		void *AllocEntry( const char *tag ) {
@@ -640,7 +649,7 @@ class alignas( 8 )QueryWriter {
 			return nullptr;
 		}
 	public:
-		explicit StackedWritersAllocator( QueryWriter *parent_ )
+		explicit StackedWritersAllocator( JsonWriter *parent_ )
 			: parent( parent_ ), topOfStack( 0 ) {
 			if( ( (uintptr_t)this ) % 8 ) {
 				QueryObject::FailWith( "StackedHelpersAllocator(): the object is misaligned!\n" );
@@ -665,7 +674,7 @@ class alignas( 8 )QueryWriter {
 		}
 	};
 
-	QueryObject *query;
+	cJSON *root;
 
 	StackedWritersAllocator writersAllocator;
 
@@ -675,41 +684,47 @@ class alignas( 8 )QueryWriter {
 	int topOfStackIndex { 0 };
 
 	CompoundWriter &TopOfStack() {
-		CheckTopOfStack( "QueryWriter::TopOfStack()", topOfStackIndex );
+		CheckTopOfStack( "JsonWriter::TopOfStack()", topOfStackIndex );
 		return *stack[topOfStackIndex];
 	}
 public:
-	explicit QueryWriter( QueryObject *query_ )
-		: query( query_ ), writersAllocator( this ) {
-		stack[topOfStackIndex] = writersAllocator.NewObjectWriter( query->RequestJsonRoot());
+	explicit JsonWriter( cJSON *root_ )
+		: root( root_ ), writersAllocator( this ) {
+		stack[topOfStackIndex] = writersAllocator.NewObjectWriter( root );
 	}
 
-	QueryWriter &operator<<( const char *nameOrValue ) {
+	/**
+	 * Submits a string to the query writer.
+	 * If the currently written child is an object and no field name set yet the string is treated as a new field name.
+	 * In all other cases the string is treated as a value of an object field or an array element.
+	 * @param nameOrValue a name of a field or a string value.
+	 */
+	JsonWriter &operator<<( const char *nameOrValue ) {
 		TopOfStack() << nameOrValue;
 		return *this;
 	}
 
-	QueryWriter &operator<<( int value ) {
+	JsonWriter &operator<<( int value ) {
 		TopOfStack() << value;
 		return *this;
 	}
 
-	QueryWriter &operator<<( int64_t value ) {
+	JsonWriter &operator<<( int64_t value ) {
 		TopOfStack() << value;
 		return *this;
 	}
 
-	QueryWriter &operator<<( double value ) {
+	JsonWriter &operator<<( double value ) {
 		TopOfStack() << value;
 		return *this;
 	}
 
-	QueryWriter &operator<<( const mm_uuid_t &value ) {
+	JsonWriter &operator<<( const mm_uuid_t &value ) {
 		TopOfStack() << value;
 		return *this;
 	}
 
-	QueryWriter &operator<<( char ch ) {
+	JsonWriter &operator<<( char ch ) {
 		TopOfStack() << ch;
 		return *this;
 	}

@@ -1356,10 +1356,10 @@ class StatsowFacade {
 			netname[0] = '\0';
 		}
 
-		void WriteToReport( class QueryWriter &writer, bool teamGame, const char **weaponNames );
-		void AddAwards( class QueryWriter &writer );
-		void AddFrags( class QueryWriter &writer );
-		void AddWeapons( class QueryWriter &writer, const char **weaponNames );
+		void WriteToReport( class JsonWriter &writer, bool teamGame, const char **weaponNames );
+		void AddAwards( class JsonWriter &writer );
+		void AddFrags( class JsonWriter &writer );
+		void AddWeapons( class JsonWriter &writer, const char **weaponNames );
 	};
 
 	ClientEntry *clientEntriesHead { nullptr };
@@ -1407,7 +1407,7 @@ public:
 	raceRun_t *NewRaceRun( const edict_t *owner, int numSectors );
 	void SetRaceTime( edict_t *owner, int sector, int64_t time );
 
-	void WriteHeaderFields( class QueryWriter &writer, int teamGame );
+	void WriteHeaderFields( class JsonWriter &writer, int teamGame );
 
 	/**
 	 * Triggers sending of a race report if necessarily.

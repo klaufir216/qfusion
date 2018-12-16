@@ -756,7 +756,7 @@ void StatsowFacade::AddFrag( const edict_t *attacker, const edict_t *victim, int
 	lfrag->time = game.serverTime - GS_MatchStartTime();
 }
 
-void StatsowFacade::WriteHeaderFields( QueryWriter &writer, int teamGame ) {
+void StatsowFacade::WriteHeaderFields( JsonWriter &writer, int teamGame ) {
 	// Note: booleans are transmitted as integers due to underlying api limitations
 	writer << "match_id"       << trap_GetConfigString( CS_MATCHUUID );
 	writer << "gametype"       << gs.gametypeName;
@@ -791,7 +791,7 @@ void StatsowFacade::SendRegularReport() {
 	}
 
 	QueryObject *query = activeQuery = trap_MM_NewPostQuery( "server/matchReport" );
-	QueryWriter writer( query );
+	JsonWriter writer( query->ResponseJsonRoot() );
 
 	// ch : race properties through GS_RaceGametype()
 
@@ -851,7 +851,7 @@ void StatsowFacade::SendRegularReport() {
 	trap_MM_SendQuery( query );
 }
 
-void StatsowFacade::ClientEntry::WriteToReport( QueryWriter &writer, bool teamGame, const char **weaponNames ) {
+void StatsowFacade::ClientEntry::WriteToReport( JsonWriter &writer, bool teamGame, const char **weaponNames ) {
 	writer << "session_id"  << mm_session;
 	writer << "name"        << netname;
 	writer << "score"       << stats.score;
@@ -897,7 +897,7 @@ void StatsowFacade::ClientEntry::WriteToReport( QueryWriter &writer, bool teamGa
 	AddFrags( writer );
 }
 
-void StatsowFacade::ClientEntry::AddAwards( QueryWriter &writer ) {
+void StatsowFacade::ClientEntry::AddAwards( JsonWriter &writer ) {
 	writer << "awards" << '[';
 	{
 		for( const gameaward_t &award: stats.awardsSequence ) {
@@ -912,7 +912,7 @@ void StatsowFacade::ClientEntry::AddAwards( QueryWriter &writer ) {
 	writer << ']';
 }
 
-void StatsowFacade::ClientEntry::AddFrags( QueryWriter &writer ) {
+void StatsowFacade::ClientEntry::AddFrags( JsonWriter &writer ) {
 	writer << "log_frags" << '[';
 	{
 		for( const loggedFrag_t &frag: stats.fragsSequence ) {
@@ -941,7 +941,7 @@ static inline double ComputeAccuracy( int hits, int shots ) {
 	return ( std::min( (int)( std::floor( ( 100.0f * ( hits ) ) / ( (float)( shots ) ) + 0.5f ) ), 99 ) );
 }
 
-void StatsowFacade::ClientEntry::AddWeapons( QueryWriter &writer, const char **weaponNames ) {
+void StatsowFacade::ClientEntry::AddWeapons( JsonWriter &writer, const char **weaponNames ) {
 	int i;
 
 	// first pass calculate the number of weapons, see if we even need this section
@@ -1048,8 +1048,7 @@ void StatsowFacade::SendRaceReport() {
 	}
 
 	QueryObject *query = activeQuery = trap_MM_NewPostQuery( "server/matchReport" );
-
-	QueryWriter writer( query );
+	JsonWriter writer( query->ResponseJsonRoot() );
 
 	WriteHeaderFields( writer, false );
 
