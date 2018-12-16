@@ -151,20 +151,30 @@ QueryObject *QueryObject::NewGetQuery( const char *url, const char *iface ) {
 	strcat( query->url, "/" );
 	strcat( query->url, url );
 	strcat( query->url, "?" );
+
+	query->isPostQuery = false;
 	return query;
 }
 
 QueryObject *QueryObject::NewPostQuery( const char *url, const char *iface ) {
 	auto *query = new( malloc( sizeof( QueryObject ) ) )QueryObject( url, iface );
-	// TODO: Get url from cvar system!
-	query->req = wswcurl_create( iface, "%s/%s", mm_url->string, ( *url == '/' ) ? url + 1 : url );
+	query->isPostQuery = true;
 	return query;
 }
 
 QueryObject::~QueryObject() {
-	// close wswcurl and json_in json_out
 	if( req ) {
-		wswcurl_delete( req );
+		::wswcurl_delete( req );
+	}
+	if( oldReq ) {
+		::wswcurl_delete( oldReq );
+	}
+
+	FormParam *nextParam;
+	for( FormParam *param = formParamsHead; param; param = nextParam ) {
+		nextParam = param->next;
+		param->~FormParam();
+		::free( param );
 	}
 
 	cJSON_Delete( requestRoot );
@@ -202,36 +212,50 @@ void QueryObject::Fire() {
 	wswcurl_start( req );
 }
 
-struct CallFree {
-	void operator()( void *p ) {
-		free( p );
-	}
-};
-
 bool QueryObject::Prepare() {
 	assert( status < STARTED );
 
-	if( !req && !url ) {
-		FailWith( "Neither request not url are specified" );
-	}
-
 	// GET request, finish the url and create the object
-	if( !req ) {
+	if( !isPostQuery ) {
 		assert( url );
 		req = wswcurl_create( iface, url );
 		return true;
 	}
 
-	if( !requestRoot ) {
+	// TODO: Get url from cvar system!
+	req = wswcurl_create( iface, "%s/%s", mm_url->string, ( *url == '/' ) ? url + 1 : url );
+	for( FormParam *param = formParamsHead; param; param = param->next ) {
+		assert( wswcurl_formadd( req, param->name, param->value ) == 0 );
+	}
+
+	if( !requestRoot && !base64EncodedJson ) {
 		return true;
 	}
 
-	std::unique_ptr<char, CallFree> json_text( cJSON_Print( requestRoot ) );
-	size_t jsonSize = strlen( json_text.get() );
+	if( requestRoot ) {
+		if( !ConvertJsonToEncodedForm() ) {
+			return false;
+		}
+		// Should have been converted
+		assert( !requestRoot );
+	}
+
+	wswcurl_formadd_raw( req, "json_attachment", base64EncodedJson, encodedJsonDataSize );
+	return true;
+}
+
+bool QueryObject::ConvertJsonToEncodedForm() {
+	struct CallFree {
+		void operator()( void *p ) {
+			free( p );
+		}
+	};
+
+	std::unique_ptr<char, CallFree> jsonText( cJSON_Print( requestRoot ) );
+	size_t jsonSize = strlen( jsonText.get() );
 
 	using DataHolder = std::unique_ptr<uint8_t, CallFree>;
 
-	// compress
 	unsigned long compSize = (unsigned)( jsonSize * 1.1f ) + 12;
 	DataHolder compressed( (uint8_t *)::malloc( compSize ) );
 	if( !compressed ) {
@@ -239,7 +263,7 @@ bool QueryObject::Prepare() {
 		return false;
 	}
 
-	int z_result = qzcompress( compressed.get(), &compSize, (unsigned char*)json_text.get(), jsonSize );
+	int z_result = qzcompress( compressed.get(), &compSize, (unsigned char*)jsonText.get(), jsonSize );
 	if( z_result != Z_OK ) {
 		Com_Printf( "StatQuery: Failed to compress JSON\n" );
 		return false;
@@ -253,10 +277,11 @@ bool QueryObject::Prepare() {
 		return false;
 	}
 
-	// TODO: Save base64 attachment for retries?
-
-	// set the json field to POST request
-	wswcurl_formadd_raw( req, "json_attachment", base64Encoded.get(), b64Size );
+	// Transfer ownership
+	base64EncodedJson = base64Encoded.release();
+	encodedJsonDataSize = b64Size;
+	// Release no longer needed JSON root
+	cJSON_Delete( requestRoot );
 	return true;
 }
 

@@ -130,10 +130,32 @@ private:
 	CompletionCallback completionCallback = []( QueryObject * ) {};
 	cJSON *requestRoot { nullptr };
 	cJSON *responseRoot { nullptr };
-	struct wswcurl_req_s *req { nullptr };
+
+	wswcurl_req_s *req { nullptr };
+	/**
+	 * Just copy a request to this var and it is going to be deleted
+	 * (we do not want to link against {@code wswcurl} in the game module.
+	 * This is for supporting query restart functionality.
+	 */
+	wswcurl_req_s *oldReq { nullptr };
+
 	char *url { nullptr };
+	size_t urlLen { 0 };
 	char *iface { nullptr };
 	char *rawResponse { nullptr };
+
+	/**
+	 * Maintain a copy of parameters for query restarts
+	 */
+	struct FormParam {
+		FormParam *next { nullptr };
+		const char *name { nullptr };
+		const char *value { nullptr };
+	};
+
+	FormParam *formParamsHead { nullptr };
+	uint8_t *base64EncodedJson { nullptr };
+	size_t encodedJsonDataSize { 0 };
 
 	enum Status: uint32_t {
 		CREATED,
@@ -149,6 +171,7 @@ private:
 
 	std::atomic<Status> status { CREATED };
 
+	bool isPostQuery { false };
 	bool deleteOnCompletion { false };
 
 	QueryObject( const char *url_, const char *iface_ );
@@ -164,6 +187,8 @@ public:
 	}
 
 	bool Prepare();
+
+	bool ConvertJsonToEncodedForm();
 
 	static void RawCallback( wswcurl_req *req, int wswStatus, void *customp );
 
@@ -182,21 +207,49 @@ public:
 		this->status.store( status_, std::memory_order_relaxed );
 	}
 
+	/**
+	 * Set a key/value request parameter.
+	 * GET parameters are added to an URL immediately.
+	 * POST parameters are saved and will be added as form parameters.
+	 * @param name a field name
+	 * @param value a field value
+	 * @return this object for conformance to fluent API style.
+	 * @note this method should be defined in this header within the class definition
+	 * so its binary code is available for all usage sites (executables and game module).
+	 */
 	QueryObject &SetField( const char *name, const char *value ) {
-		if( req ) {
-			wswcurl_formadd( req, name, "%s", value );
-		} else if( url ) {
+		assert( name && value );
+		size_t nameDataSize = ::strlen( name ) + 1;
+		assert( nameDataSize < std::numeric_limits<uint32_t>::max() );
+		size_t valueDataSize = ::strlen( value ) + 1;
+		assert( valueDataSize < std::numeric_limits<uint32_t>::max() );
+
+		if( !isPostQuery ) {
+			assert( url );
 			// GET request, store parameters
 			// add in '=', '&' and '\0' = 3
 
 			// FIXME: add proper URL encode
-			size_t len = strlen( url ) + strlen( name ) + strlen( value ) + 3;
+			size_t len = urlLen + 1 + nameDataSize + valueDataSize;
 			url = (char *)realloc( url, len );
+			urlLen = len;
 			strcat( url, name );
 			strcat( url, "=" );
 			strcat( url, value );
 			strcat( url, "&" );
+			return *this;
 		}
+
+		auto *mem = (uint8_t *) ::malloc( sizeof( FormParam ) + nameDataSize + valueDataSize );
+		auto *param = new( mem )FormParam;
+		mem += sizeof( FormParam );
+		param->name = (char *) (mem);
+		::memcpy( mem, name, nameDataSize );
+		mem += nameDataSize;
+		param->value = (char *) (mem);
+		::memcpy( mem, value, valueDataSize );
+		param->next = formParamsHead;
+		formParamsHead = param;
 		return *this;
 	}
 
@@ -284,11 +337,14 @@ public:
 	}
 
 	cJSON *RequestJsonRoot() {
-		if( !req ) {
+		if( !isPostQuery ) {
 			FailWith( "Attempt to add a JSON root to a GET request" );
 		}
 		if( status.load( std::memory_order_seq_cst ) >= STARTED ) {
 			FailWith( "Attempt to add a JSON root to an already started request" );
+		}
+		if( base64EncodedJson ) {
+			FailWith( "Attempt to modify already built JSON data (saved as base64)" );
 		}
 		if( !requestRoot ) {
 			requestRoot = cJSON_CreateObject();
@@ -358,20 +414,14 @@ public:
 	}
 
 	void ResetForRetry() {
-		assert( IsReady() );
-		status = CREATED;
-
-		if( responseRoot ) {
-			::free( responseRoot );
-			responseRoot = nullptr;
+		if( req ) {
+			assert( !oldReq );
+			std::swap( req, oldReq );
 		}
-
 		if( rawResponse ) {
 			::free( rawResponse );
-			rawResponse = nullptr;
 		}
-
-		deleteOnCompletion = false;
+		SetStatus( CREATED );
 	}
 };
 
