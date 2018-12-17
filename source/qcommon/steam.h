@@ -21,14 +21,18 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef _STEAM_LIB_H_
 #define _STEAM_LIB_H_
 
-void Steam_LoadLibrary( void );
-void Steam_UnloadLibrary( void );
-void Steam_Init( void );
-void Steam_RunFrame( void );
-void Steam_Shutdown( void );
-uint64_t Steam_GetSteamID( void );
-int Steam_GetAuthSessionTicket( void ( *callback )( void *, size_t ) );
-void Steam_AdvertiseGame( const uint8_t *ip, unsigned short port );
-void Steam_GetPersonaName( char *name, size_t namesize );
+inline void Steam_LoadLibrary() {}
+inline void Steam_UnloadLibrary() {}
+inline void Steam_Init() {}
+inline void Steam_RunFrame() {}
+inline void Steam_Shutdown() {}
+inline uint64_t Steam_GetSteamID() { return 0; }
+inline int Steam_GetAuthSessionTicket( void ( *callback )( void *, size_t ) ) { return 0; }
+inline void Steam_AdvertiseGame( const uint8_t *ip, unsigned short port ) {}
+inline void Steam_GetPersonaName( char *name, size_t namesize ) {
+	if( namesize ) {
+		*name = '\0';
+	}
+}
 
 #endif // _STEAM_LIB_H_
