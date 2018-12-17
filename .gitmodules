@@ -13,3 +13,6 @@
 [submodule "third-party/openal-soft"]
 	path = third-party/openal-soft
 	url = https://github.com/Warsow/openal-soft.git
+[submodule "third-party/sqlite-amalgamation"]
+	path = third-party/sqlite-amalgamation
+	url = https://github.com/Warsow/sqlite-amalgamation.git
