@@ -554,6 +554,7 @@ class QueryObject *SV_MM_NewGetQuery( const char *url );
 class QueryObject *SV_MM_NewPostQuery( const char *url );
 void SV_MM_DeleteQuery( class QueryObject *query );
 bool SV_MM_SendQuery( class QueryObject *query );
+void SV_MM_EnqueueReport( class QueryObject *matchReport );
 void SV_MM_GameState( bool state );
 
 void SV_MM_GetMatchUUID( void ( *callback_fn )( const char *uuid ) );

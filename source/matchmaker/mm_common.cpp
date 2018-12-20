@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../qcommon/qcommon.h"
 #include "../qalgo/base64.h"
 #include "../qcommon/wswcurl.h"
+#include "mm_reliable_pipe.h"
 
 cvar_t *mm_url;
 
@@ -93,10 +94,19 @@ void MM_Init() {
 
 	mm_url = Cvar_Get( "mm_url", APP_MATCHMAKER_URL, CVAR_ARCHIVE | CVAR_NOSET );
 
+	// Check whether MM is going to be used at all before creating the reliable pipe
+	// that spawns its own threads and performs a database IO on regular basis.
+	if( Cvar_Value( "sv_mm_enable" ) != 0.0f ) {
+		ReliablePipe::Init();
+	}
+
 	mm_initialized = true;
 }
 
 void MM_Shutdown() {
+	// This is safe to call regardless whether Init() was called or not.
+	ReliablePipe::Shutdown();
+
 	mm_url = NULL;
 	mm_initialized = false;
 }

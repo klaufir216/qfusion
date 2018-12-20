@@ -20,6 +20,26 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef __MM_RATING_H__
 #define __MM_RATING_H__
 
+#ifdef min
+#undef min
+#endif
+
+#ifdef max
+#undef max
+#endif
+
+#include <cstdint>
+#include <cstdlib>
+#include <cinttypes>
+#include <cassert>
+#include <cstring>
+#include <cmath>
+#include <limits>
+#include <new>
+#include <utility>
+#include <functional>
+#include <atomic>
+
 //=============================================
 //	rating
 //=============================================
@@ -56,6 +76,7 @@ struct mm_uuid_t {
 
 	char *ToString( char *buffer ) const;
 	static mm_uuid_t *FromString( const char *buffer, mm_uuid_t *dest );
+	static mm_uuid_t Random();
 };
 
 // Let pass non-modified parameters by value to reduce visual clutter

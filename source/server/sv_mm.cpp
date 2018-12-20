@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../matchmaker/mm_common.h"
 #include "../matchmaker/mm_rating.h"
 #include "../matchmaker/mm_query.h"
+#include "../matchmaker/mm_reliable_pipe.h"
 
 #ifdef min
 #undef min
@@ -106,6 +107,11 @@ bool SV_MM_SendQuery( class QueryObject *query ) {
 	// TODO: Check?
 	query->SetServerSession( sv_mm_session );
 	return query->SendForStatusPolling();
+}
+
+void SV_MM_EnqueueReport( class QueryObject *query ) {
+	query->SetServerSession( sv_mm_session );
+	ReliablePipe::Instance()->EnqueueMatchReport( query );
 }
 
 // TODO: instead of this, factor ClientDisconnect to game module which can flag

@@ -539,6 +539,7 @@ void SV_InitGameProgs( void ) {
 	import.MM_NewPostQuery = SV_MM_NewPostQuery;
 	import.MM_DeleteQuery = SV_MM_DeleteQuery;
 	import.MM_SendQuery = SV_MM_SendQuery;
+	import.MM_EnqueueReport = SV_MM_EnqueueReport;
 	import.MM_GameState = SV_MM_GameState;
 
 	// clear module manifest string

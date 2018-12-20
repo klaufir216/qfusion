@@ -26,25 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../qcommon/wswcurl.h"
 #include "../qcommon/cjson.h"
 
-#ifdef min
-#undef min
-#endif
-
-#ifdef max
-#undef max
-#endif
-
-#include <cstdint>
-#include <cstdlib>
-#include <cassert>
-#include <cstring>
-#include <cmath>
-#include <limits>
-#include <new>
-#include <utility>
-#include <functional>
-#include <atomic>
-
 /**
  * A proxy that wraps an underlying {@code cJSON} value and provides convenient accessor methods.
  */
@@ -114,6 +95,8 @@ class QueryObject {
 	friend class NodeReader;
 	friend class ObjectReader;
 	friend class ArrayReader;
+	friend class LocalReportsStorage;
+	friend class ReportsUploader;
 public:
 	using CompletionCallback = std::function<void( QueryObject * )>;
 
@@ -151,11 +134,13 @@ private:
 		FormParam *next { nullptr };
 		const char *name { nullptr };
 		const char *value { nullptr };
+		// TODO: Once again, we're looking forward to ability to use C++17 string_view for our builds
+		uint32_t nameLen { 0 };
+		uint32_t valueLen { 0 };
 	};
 
 	FormParam *formParamsHead { nullptr };
-	uint8_t *base64EncodedJson { nullptr };
-	size_t encodedJsonDataSize { 0 };
+	bool hasConveredJsonToFormParam { false };
 
 	enum Status: uint32_t {
 		CREATED,
@@ -177,6 +162,10 @@ private:
 	QueryObject( const char *url_, const char *iface_ );
 
 	~QueryObject();
+
+	const char *FindFormParamByName( const char *name ) const;
+
+	void ClearFormData();
 public:
 	static QueryObject *NewGetQuery( const char *url, const char *iface = nullptr );
 	static QueryObject *NewPostQuery( const char *url, const char *iface = nullptr );
@@ -207,6 +196,8 @@ public:
 		this->status.store( status_, std::memory_order_relaxed );
 	}
 
+
+
 	/**
 	 * Set a key/value request parameter.
 	 * GET parameters are added to an URL immediately.
@@ -219,10 +210,18 @@ public:
 	 */
 	QueryObject &SetField( const char *name, const char *value ) {
 		assert( name && value );
-		size_t nameDataSize = ::strlen( name ) + 1;
-		assert( nameDataSize < std::numeric_limits<uint32_t>::max() );
-		size_t valueDataSize = ::strlen( value ) + 1;
-		assert( valueDataSize < std::numeric_limits<uint32_t>::max() );
+		size_t nameLen = ::strlen( name );
+		assert( nameLen <= std::numeric_limits<uint32_t>::max() );
+		size_t valueLen = ::strlen( value );
+		assert( valueLen <= std::numeric_limits<uint32_t>::max() );
+
+		return SetField( name, nameLen, value, valueLen );
+	}
+
+	QueryObject &SetField( const char *name, size_t nameLen, const char *value, size_t valueLen ) {
+		// WARNING!
+		// Do not rely on input strings having zero terminators.
+		// Copy the given bytes count exactly and put zero bytes after manually.
 
 		if( !isPostQuery ) {
 			assert( url );
@@ -230,24 +229,37 @@ public:
 			// add in '=', '&' and '\0' = 3
 
 			// FIXME: add proper URL encode
-			size_t len = urlLen + 1 + nameDataSize + valueDataSize;
+			size_t len = urlLen + 3 + nameLen + valueLen;
 			url = (char *)realloc( url, len );
+
+			char *mem = url + urlLen;
+			::memcpy( mem, name, nameLen );
+			mem += nameLen;
+			*mem++ = '=';
+			memcpy( mem, value, valueLen );
+			*mem++ = '&';
+			*mem++ = '\0';
+
 			urlLen = len;
-			strcat( url, name );
-			strcat( url, "=" );
-			strcat( url, value );
-			strcat( url, "&" );
 			return *this;
 		}
 
-		auto *mem = (uint8_t *) ::malloc( sizeof( FormParam ) + nameDataSize + valueDataSize );
+		auto *mem = (uint8_t *) ::malloc( sizeof( FormParam ) + nameLen + 1 + valueLen + 1 );
 		auto *param = new( mem )FormParam;
 		mem += sizeof( FormParam );
-		param->name = (char *) (mem);
-		::memcpy( mem, name, nameDataSize );
-		mem += nameDataSize;
-		param->value = (char *) (mem);
-		::memcpy( mem, value, valueDataSize );
+
+		param->name = (char *)( mem );
+		param->nameLen = (uint32_t)nameLen;
+		::memcpy( mem, name, nameLen );
+		mem[nameLen] = '\0';
+
+		mem += nameLen + 1;
+
+		param->value = (char *)( mem );
+		param->valueLen = (uint32_t)valueLen;
+		::memcpy( mem, value, valueLen );
+		mem[valueLen] = '\0';
+
 		param->next = formParamsHead;
 		formParamsHead = param;
 		return *this;
@@ -343,8 +355,8 @@ public:
 		if( status.load( std::memory_order_seq_cst ) >= STARTED ) {
 			FailWith( "Attempt to add a JSON root to an already started request" );
 		}
-		if( base64EncodedJson ) {
-			FailWith( "Attempt to modify already built JSON data (saved as base64)" );
+		if( hasConveredJsonToFormParam ) {
+			FailWith( "A JSON root has already been converted to a form param" );
 		}
 		if( !requestRoot ) {
 			requestRoot = cJSON_CreateObject();

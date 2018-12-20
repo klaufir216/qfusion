@@ -51,6 +51,7 @@ file(GLOB SERVER_SOURCES
     "../gameshared/q_*.c"
     "../qalgo/*.c"
     "../matchmaker/*.cpp"
+	"../../third-party/sqlite-amalgamation/sqlite3.c"
 )
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
@@ -66,7 +67,8 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
         "../win32/conproc.cpp"
     )
 
-    set(SERVER_PLATFORM_LIBRARIES "ws2_32.lib" "winmm.lib")
+    # Link Ole32.lib for CoCreateGUID()
+    set(SERVER_PLATFORM_LIBRARIES "ws2_32.lib" "winmm.lib" "Ole32.lib")
     set(SERVER_BINARY_TYPE WIN32)
 else()
     file(GLOB SERVER_PLATFORM_SOURCES 
@@ -80,14 +82,17 @@ else()
         "../null/sys_vfs_null.cpp"
     )
 
-    set(SERVER_PLATFORM_LIBRARIES "pthread" "dl" "m")
+    # Link libuuid
+    set(SERVER_PLATFORM_LIBRARIES "pthread" "dl" "m" "uuid")
     set(SERVER_BINARY_TYPE "")
 endif()
 
 if (MSVC)
 	set_source_files_properties("../qcommon/cm_trace_sse42.cpp" PROPERTIES COMPILE_FLAGS "/arch:AVX")
+	set_source_files_properties("../../third-party/sqlite-amalgamation/sqlite3.c" PROPERTIES COMPILE_FLAGS "/fp:precise")
 else()
 	set_source_files_properties("../qcommon/cm_trace_sse42.cpp" PROPERTIES COMPILE_FLAGS "-msse4.2")
+	set_source_files_properties("../../third-party/sqlite-amalgamation/sqlite3.c" PROPERTIES COMPILE_FLAGS "-fno-fast-math")
 endif()
 
 add_executable(${QFUSION_SERVER_NAME} ${SERVER_BINARY_TYPE} ${SERVER_HEADERS} ${SERVER_SOURCES} ${SERVER_PLATFORM_SOURCES})

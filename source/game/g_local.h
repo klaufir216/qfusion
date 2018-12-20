@@ -1367,16 +1367,6 @@ class StatsowFacade {
 
 	StatsSequence<raceRun_t> raceRuns;
 
-	StatsSequence<raceRun_t> raceRunsToSend;
-
-	/**
-	 * A query currently being executed.
-	 */
-	QueryObject *activeQuery { nullptr };
-
-	/**
-	 * True if new results are produced while the active query is still being processed.
-	 */
 	bool hasPendingResults { false };
 
 	bool isDiscarded { false };
@@ -1390,8 +1380,6 @@ class StatsowFacade {
 	RespectStats *FindRespectStatsById( const mm_uuid_t &playerSessionId );
 
 	ClientEntry *NewPlayerEntry( edict_t *ent, bool final );
-
-	bool WaitForQuery();
 public:
 	static void Init();
 	static void Shutdown();

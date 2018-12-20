@@ -41,9 +41,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 static SingletonHolder<StatsowFacade> statsHolder;
 
-// number of raceruns to send in one batch
-#define RACERUN_BATCH_SIZE  16
-
 //====================================================
 
 static clientRating_t *g_ratingAlloc( const char *gametype, float rating, float deviation, mm_uuid_t uuid ) {
@@ -308,10 +305,13 @@ void StatsowFacade::SetRaceTime( edict_t *owner, int sector, int64_t time ) {
 		// reuse this one in nrr
 		rr->times = nullptr;
 
-		// see if we have to push intermediate result
-		// TODO: We can live with eventual consistency of race records, but it should be kept in mind
-		// TODO: Send new race runs every N seconds, or if its likely to be a new record
-		if( raceRuns.size() >= RACERUN_BATCH_SIZE ) {
+		// Once the reliable match reports pipe has been implemented
+		// we can avoid batching sent race runs in game module.
+		// Still keep in mind that all race records are valid only locally.
+		// Announcement of new game-global records is tied to introduction
+		// of a full-duplex channel between Statsow server and every game server
+		// that is planned for future development.
+		if( !raceRuns.empty() ) {
 			// Update an actual nickname that is going to be used to identify a run for a non-authenticated player
 			if( !cl->mm_session.IsValidSessionId() ) {
 				Q_strncpyz( rr->nickname, cl->netname, MAX_NAME_BYTES );
@@ -352,99 +352,12 @@ StatsowFacade *StatsowFacade::Instance() {
 }
 
 StatsowFacade::~StatsowFacade() {
-	if( activeQuery ) {
-		bool succeeded = WaitForQuery();
-		trap_MM_DeleteQuery( activeQuery );
-		if( succeeded ) {
-			return;
-		}
-
-		if( raceRunsToSend.empty() ) {
-			return;
-		}
-
-		raceRuns.MergeWith( std::move( raceRunsToSend ) );
-		hasPendingResults = true;
-	}
-
-	if( !hasPendingResults ) {
-		return;
-	}
-
-	SendRaceReport();
-	if( activeQuery ) {
-		(void)WaitForQuery();
-		trap_MM_DeleteQuery( activeQuery );
-	}
-}
-
-bool StatsowFacade::WaitForQuery() {
-	assert( activeQuery );
-
-	// This is ugly af but it helps to avoid intrusive changes to the
-	int numAttepts = 0;
-	for(;; ) {
-		trap_MM_SendQuery( activeQuery );
-
-		std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
-		while( !activeQuery->IsReady() ) {
-			std::this_thread::sleep_for( std::chrono::milliseconds( 16 ) );
-		}
-
-		if( activeQuery->HasSucceeded() ) {
-			G_Printf( "The query we were waiting for has been sent successfully\n" );
-			return true;
-		}
-
-		const char *const tag = "StatsowFacade::WaitForQuery()";
-		if( !activeQuery->ShouldRetry() ) {
-			G_Printf( S_COLOR_RED "%s: Unrecoverable error. Query data is lost\n", tag );
-			return false;
-		}
-		if( numAttepts == 2 ) {
-			G_Printf( S_COLOR_RED "%s: Stopping fruitless retry attempt. Query data is lost\n", tag );
-			return false;
-		}
-
-		numAttepts++;
-		activeQuery->ResetForRetry();
-		std::this_thread::sleep_for( std::chrono::milliseconds( 250 + 250 * numAttepts ) );
+	if( !raceRuns.empty() ) {
+		SendRaceReport();
 	}
 }
 
 void StatsowFacade::Frame() {
-	if( !activeQuery ) {
-		if( hasPendingResults && !raceRuns.empty() ) {
-			// Start sending a race report for pending results
-			SendRaceReport();
-			hasPendingResults = false;
-		}
-		return;
-	}
-
-	if( !activeQuery->IsReady() ) {
-		return;
-	}
-
-	if( activeQuery->HasSucceeded() ) {
-		trap_MM_DeleteQuery( activeQuery );
-		activeQuery = nullptr;
-		// We're going to check for pending results next frame
-		return;
-	}
-
-	if( activeQuery->ShouldRetry() ) {
-		activeQuery->ResetForRetry();
-		trap_MM_SendQuery( activeQuery );
-		return;
-	}
-
-	trap_MM_DeleteQuery( activeQuery );
-	// There should currently be some race runs to deliver
-	assert( !raceRunsToSend.empty() );
-	// Add non-delivered race runs to the accumulated ones
-	raceRuns.MergeWith( std::move( raceRunsToSend ) );
-	hasPendingResults = true;
 }
 
 void StatsowFacade::ClearEntries() {
@@ -785,12 +698,7 @@ void StatsowFacade::SendRegularReport() {
 		return;
 	}
 
-	if( activeQuery ) {
-		hasPendingResults = true;
-		return;
-	}
-
-	QueryObject *query = activeQuery = trap_MM_NewPostQuery( "server/matchReport" );
+	QueryObject *query = trap_MM_NewPostQuery( "server/matchReport" );
 	JsonWriter writer( query->ResponseJsonRoot() );
 
 	// ch : race properties through GS_RaceGametype()
@@ -847,8 +755,7 @@ void StatsowFacade::SendRegularReport() {
 	}
 	writer << ']';
 
-	// TODO: We have to wait for completion then try again if needed and always delete the query anyway
-	trap_MM_SendQuery( query );
+	trap_MM_EnqueueReport( query );
 }
 
 void StatsowFacade::ClientEntry::WriteToReport( JsonWriter &writer, bool teamGame, const char **weaponNames ) {
@@ -1042,12 +949,7 @@ void StatsowFacade::SendRaceReport() {
 		return;
 	}
 
-	if( activeQuery ) {
-		hasPendingResults = true;
-		return;
-	}
-
-	QueryObject *query = activeQuery = trap_MM_NewPostQuery( "server/matchReport" );
+	QueryObject *query = trap_MM_NewPostQuery( "server/matchReport" );
 	JsonWriter writer( query->ResponseJsonRoot() );
 
 	WriteHeaderFields( writer, false );
@@ -1079,15 +981,7 @@ void StatsowFacade::SendRaceReport() {
 	}
 	writer << ']';
 
-	raceRunsToSend.Clear();
-	raceRunsToSend.MergeWith( std::move( raceRuns ) );
-	assert( raceRuns.empty() );
-	assert( !raceRuns.empty() );
-
-	// Make sure we've marked the query as an active
-	assert( activeQuery );
-	// Start sending again. Start polling activeQuery status next frame
-	trap_MM_SendQuery( query );
+	trap_MM_EnqueueReport( query );
 }
 
 #ifndef GAME_HARD_LINKED

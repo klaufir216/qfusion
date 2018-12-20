@@ -170,12 +170,7 @@ QueryObject::~QueryObject() {
 		::wswcurl_delete( oldReq );
 	}
 
-	FormParam *nextParam;
-	for( FormParam *param = formParamsHead; param; param = nextParam ) {
-		nextParam = param->next;
-		param->~FormParam();
-		::free( param );
-	}
+	ClearFormData();
 
 	cJSON_Delete( requestRoot );
 	cJSON_Delete( responseRoot );
@@ -183,6 +178,29 @@ QueryObject::~QueryObject() {
 	::free( iface );
 	::free( url );
 	::free( rawResponse );
+}
+
+void QueryObject::ClearFormData() {
+	FormParam *nextParam;
+	for( FormParam *param = formParamsHead; param; param = nextParam ) {
+		nextParam = param->next;
+		param->~FormParam();
+		::free( param );
+	}
+
+	hasConveredJsonToFormParam = false;
+}
+
+const char *QueryObject::FindFormParamByName( const char *name ) const {
+	assert( isPostQuery );
+
+	// Slow but satisfactory for callers
+	for( FormParam *param = formParamsHead; param; param = param->next ) {
+		if( !Q_stricmp( param->name, name ) ) {
+			return param->value;
+		}
+	}
+	return nullptr;
 }
 
 bool QueryObject::SendForStatusPolling() {
@@ -222,16 +240,6 @@ bool QueryObject::Prepare() {
 		return true;
 	}
 
-	// TODO: Get url from cvar system!
-	req = wswcurl_create( iface, "%s/%s", mm_url->string, ( *url == '/' ) ? url + 1 : url );
-	for( FormParam *param = formParamsHead; param; param = param->next ) {
-		assert( wswcurl_formadd( req, param->name, param->value ) == 0 );
-	}
-
-	if( !requestRoot && !base64EncodedJson ) {
-		return true;
-	}
-
 	if( requestRoot ) {
 		if( !ConvertJsonToEncodedForm() ) {
 			return false;
@@ -240,7 +248,17 @@ bool QueryObject::Prepare() {
 		assert( !requestRoot );
 	}
 
-	wswcurl_formadd_raw( req, "json_attachment", base64EncodedJson, encodedJsonDataSize );
+	// TODO: Get url from cvar system!
+	req = wswcurl_create( iface, "%s/%s", mm_url->string, ( *url == '/' ) ? url + 1 : url );
+	for( FormParam *param = formParamsHead; param; param = param->next ) {
+		// Hack for encoded JSON that is stored along other parameters
+		if( Q_stricmp( param->name, "json_attachment" ) != 0 ) {
+			assert( !wswcurl_formadd( req, param->name, param->value ) );
+		} else {
+			assert( !wswcurl_formadd_raw( req, "json_attachment", (void *)param->value, param->valueLen ) );
+		}
+	}
+
 	return true;
 }
 
@@ -277,9 +295,8 @@ bool QueryObject::ConvertJsonToEncodedForm() {
 		return false;
 	}
 
-	// Transfer ownership
-	base64EncodedJson = base64Encoded.release();
-	encodedJsonDataSize = b64Size;
+	SetField( "json_attachment", strlen( "json_attachment"), (const char *)base64Encoded.get(), b64Size );
+
 	// Release no longer needed JSON root
 	cJSON_Delete( requestRoot );
 	return true;

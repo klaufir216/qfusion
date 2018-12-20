@@ -24,6 +24,34 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../qcommon/qcommon.h"
 #include "mm_rating.h"
 
+#ifndef _WIN32
+
+#include <uuid/uuid.h>
+
+mm_uuid_t *Uuid_FromString( const char *buffer, mm_uuid_t *dest ) {
+	if( ::uuid_parse( buffer, (uint8_t *)dest ) < 0 ) {
+		return nullptr;
+	}
+	return dest;
+}
+
+char *Uuid_ToString( char *buffer, mm_uuid_t uuid ) {
+	::uuid_unparse( (uint8_t *)&uuid, buffer );
+	return buffer;
+}
+
+mm_uuid_t mm_uuid_t::Random() {
+	mm_uuid_t result;
+	::uuid_generate( (uint8_t *)&result );
+	return result;
+}
+
+#else
+
+// It's better to avoid using platform formatting routines on Windows.
+// A brief look at the API's provided (some allocations are involved)
+// is sufficient to alienate a coder.
+
 mm_uuid_t *Uuid_FromString( const char *buffer, mm_uuid_t *dest ) {
 	unsigned long long groups[5];
 	int expectedHyphenIndices[4] = { 8, 13, 18, 23 };
@@ -71,6 +99,17 @@ char *Uuid_ToString( char *buffer, const mm_uuid_t uuid ) {
 	Q_snprintfz( buffer, UUID_BUFFER_SIZE, format, groups[0], groups[1], groups[2], groups[3], groups[4] );
 	return buffer;
 }
+
+#include <Objbase.h>
+
+mm_uuid_t mm_uuid_t::Random() {
+	static_assert( sizeof( mm_uuid_t ) == sizeof( GUID ), "" );
+	mm_uuid_t result;
+	(void)::CoCreateGuid( (GUID *)&result );
+	return result;
+}
+
+#endif
 
 /*
  * ============================================================================
