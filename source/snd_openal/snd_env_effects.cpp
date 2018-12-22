@@ -331,14 +331,13 @@ void EaxReverbEffect::UpdatePanning( src_s *src, const vec3_t listenerOrigin, co
 }
 
 void EaxReverbEffect::UpdateDelegatedSpatialization( struct src_s *src, const vec3_t listenerOrigin ) {
-	if( src->attenuation == 1.0f ) {
+	if( src->attenuation == ATTN_NONE ) {
 		// It MUST already be a relative sound
 #ifndef PUBLIC_BUILD
 		ALint value;
 		qalGetSourcei( src->source, AL_SOURCE_RELATIVE, &value );
-		assert( value == AL_FALSE );
+		assert( value == AL_TRUE );
 #endif
-		qalSourcei( src->source, AL_SOURCE_RELATIVE, AL_FALSE );
 		return;
 	}
 
