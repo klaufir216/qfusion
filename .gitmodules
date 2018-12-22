@@ -4,9 +4,6 @@
 [submodule "third-party/angelscript"]
 	path = third-party/angelscript
 	url = https://github.com/Qfusion/angelscript.git
-[submodule "libsrcs"]
-	path = libsrcs
-	url = https://github.com/Qfusion/qfusion-libsrcs.git
 [submodule "third-party/recastnavigation"]
 	path = third-party/recastnavigation
 	url = https://github.com/Warsow/recastnavigation.git
@@ -16,3 +13,6 @@
 [submodule "third-party/sqlite-amalgamation"]
 	path = third-party/sqlite-amalgamation
 	url = https://github.com/Warsow/sqlite-amalgamation.git
+[submodule "libsrcs"]
+	path = libsrcs
+	url = https://github.com/Warsow/qfusion-libsrcs.git
