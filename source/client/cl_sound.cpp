@@ -231,15 +231,6 @@ static const char *CL_SoundModule_GetConfigString( int index ) {
 * CL_SoundModule_Init
 */
 void CL_SoundModule_Init( bool verbose ) {
-	static const struct {
-		const char *name;
-		const int num;
-	} sound_modules[] = {
-		{ "openal_soft", 3 },
-		{ "openal_system", 2 },
-		{ "qf", 1 }
-	};
-	static const int num_sound_modules = sizeof( sound_modules ) / sizeof( sound_modules[0] );
 	sound_import_t import;
 
 	if( !s_module ) {
@@ -255,7 +246,7 @@ void CL_SoundModule_Init( bool verbose ) {
 
 	Cvar_GetLatchedVars( CVAR_LATCH_SOUND );
 
-	if( s_module->integer < 0 || s_module->integer > num_sound_modules ) {
+	if( s_module->integer < 0 || s_module->integer > 1 ) {
 		Com_Printf( "Invalid value for s_module (%i), reseting to default\n", s_module->integer );
 		Cvar_ForceSet( "s_module", s_module->dvalue );
 	}
@@ -340,32 +331,8 @@ void CL_SoundModule_Init( bool verbose ) {
 	import.BufPipe_ReadCmds = QBufPipe_ReadCmds;
 	import.BufPipe_Wait = QBufPipe_Wait;
 
-	int sm;
-	for( sm = 0; sm < num_sound_modules; ++sm ) {
-		if( sound_modules[sm].num == s_module->integer ) { break; }
-	}
-	assert( sm != num_sound_modules && "Sound modules definition is bugged" );
-
-	if ( !CL_SoundModule_Load( sound_modules[sm].name, &import, verbose ) ) {
-		const int tried = sm;
-		for( sm = 0; sm < num_sound_modules; ++sm ) {
-			if( sm == tried ) {
-				continue;
-			}
-			if( CL_SoundModule_Load( sound_modules[sm].name, &import, verbose ) ) {
-				break;
-			}
-		}
-		if( sm == num_sound_modules ) {
-			if( verbose ) {
-				Com_Printf( "Couldn't load a sound module\n" );
-				Com_Printf( "------------------------------------\n" );
-			}
-			Mem_FreePool( &cl_soundmodulepool );
-			se = NULL;
-			return;
-		}
-		Cvar_ForceSet( "s_module", va( "%i", sound_modules[sm].num ) );
+	if ( !CL_SoundModule_Load( "openal_soft", &import, verbose ) ) {
+		Cvar_ForceSet( "s_module", "0" );
 	}
 
 	CL_SoundModule_SetAttenuationModel();

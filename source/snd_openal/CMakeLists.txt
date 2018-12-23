@@ -1,6 +1,6 @@
 project(snd_openal)
 
-include_directories(${VORBIS_INCLUDE_DIR} ${OGG_INCLUDE_DIR} "../snd_common" ".")
+include_directories(${VORBIS_INCLUDE_DIR} ${OGG_INCLUDE_DIR} ".")
 
 file(GLOB SND_OPENAL_HEADERS
     "*.h"
@@ -30,11 +30,6 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Linux" OR "Darwin")
         set_source_files_properties("snd_propagation.cpp" PROPERTIES COMPILE_FLAGS "-O3")
     endif ()
 endif ()
-
-add_library(snd_openal_system SHARED ${SND_OPENAL_HEADERS} ${SND_OPENAL_SOURCES})
-target_include_directories(snd_openal_system BEFORE PRIVATE ${OPENAL_INCLUDE_DIR})
-target_link_libraries(snd_openal_system PRIVATE ${OGG_LIBRARY} ${VORBIS_LIBRARIES} ${SND_OPENAL_PLATFORM_LIBRARIES})
-qf_set_output_dir(snd_openal_system libs)
 
 set(OPENAL_SOFT_DIR "${CMAKE_HOME_DIRECTORY}/../third-party/openal-soft")
 
