@@ -274,4 +274,8 @@ static inline void trap_BufPipe_Wait( qbufPipe_t *queue, int ( *read )( qbufPipe
 	SOUND_IMPORT.BufPipe_Wait( queue, read, cmdHandlers, timeout_msec );
 }
 
+static inline bool trap_GetNumberOfProcessors( unsigned *physical, unsigned *logical ) {
+	return SOUND_IMPORT.GetNumberOfProcessors( physical, logical );
+}
+
 #endif

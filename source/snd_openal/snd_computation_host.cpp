@@ -21,13 +21,14 @@ void ParallelComputationHost::Shutdown() {
 }
 
 int ParallelComputationHost::SuggestNumberOfTasks() {
-	// Best we can do right now.
-	// Its better to write Sys_ implementation for every platform.
-	if( auto hardwareConcurrency = std::thread::hardware_concurrency() ) {
-		// Its better to use all available resources, otherwise the game is going to hang longer.
-		// We are not sure whether "fake" (HT) cores should be taken into account.
-		// We could really benefit from HT if there is a fair amount of cache misses.
-		return hardwareConcurrency;
+	unsigned numPhysicalProcessors, numLogicalProcessors;
+	if( trap_GetNumberOfProcessors( &numPhysicalProcessors, &numLogicalProcessors ) ) {
+		// It's unlikely that the number of threads per physical core > 2 but let's use an inequality
+		assert( numLogicalProcessors >= numPhysicalProcessors * 2 );
+		// We think adding more tasks than number of physical processors is the right move
+		// as the propagation graph computations (unfortunately) are not cache-friendly
+		// and using hyper-threading can fill pipeline stalls time to some degree.
+		return numPhysicalProcessors + ( numLogicalProcessors - 1 );
 	}
 	return 2;
 }
