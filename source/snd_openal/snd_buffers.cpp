@@ -26,6 +26,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // Hack... set quality hint based on sound fx name
 #include "../gameshared/gs_qrespath.h"
 
+#include <memory>
+
 #define MAX_SFX 4096
 sfx_t knownSfx[MAX_SFX];
 static bool buffers_inited = false;
@@ -34,7 +36,7 @@ static bool buffers_inited = false;
 * Local helper functions
 */
 
-void * stereo_mono( void *data, snd_info_t *info ) {
+void * stereo_mono( void *data, snd_info_t *__restrict info ) {
 	int i, interleave, gain;
 	void *outdata;
 
@@ -44,19 +46,15 @@ void * stereo_mono( void *data, snd_info_t *info ) {
 	clamp( gain, -1, 1 );
 
 	if( info->width == 2 ) {
-		short *pin, *pout;
-
-		pin = (short*)data;
-		pout = (short*)outdata;
+		auto *__restrict pin = (short*)data;
+		auto *__restrict pout = (short*)outdata;
 
 		for( i = 0; i < info->size; i += interleave, pin += info->channels, pout++ ) {
 			*pout = ( ( 1 - gain ) * pin[0] + ( 1 + gain ) * pin[1] ) / 2;
 		}
 	} else if( info->width == 1 ) {
-		char *pin, *pout;
-
-		pin = (char*)data;
-		pout = (char*)outdata;
+		auto *__restrict pin = (signed char*)data;
+		auto *__restrict pout = (signed char*)outdata;
 
 		for( i = 0; i < info->size; i += interleave, pin += info->channels, pout++ ) {
 			*pout = ( ( 1 - gain ) * pin[0] + ( 1 + gain ) * pin[1] ) / 2;
@@ -102,12 +100,20 @@ bool S_UnloadBuffer( sfx_t *sfx ) {
 		return false;
 	}
 
-	qalDeleteBuffers( 1, &sfx->buffer );
-	if( ( error = qalGetError() ) != AL_NO_ERROR ) {
-		Com_Printf( "Couldn't delete sound buffer for %s (%s)", sfx->filename, S_ErrorMessage( error ) );
-		sfx->isLocked = true;
-		return false;
+	for( ALuint buffer: { sfx->buffer, sfx->stereoBuffer } ) {
+		if( !buffer ) {
+			continue;
+		}
+		qalDeleteBuffers( 1, &buffer );
+		if( ( error = qalGetError() ) != AL_NO_ERROR ) {
+			Com_Printf( "Couldn't delete sound buffer for %s (%s)", sfx->filename, S_ErrorMessage( error ) );
+			sfx->isLocked = true;
+			return false;
+		}
 	}
+
+	sfx->buffer = 0;
+	sfx->stereoBuffer = 0;
 
 	sfx->inMemory = false;
 
@@ -181,12 +187,38 @@ static void S_SetQualityHint( sfx_t *sfx ) {
 	sfx->qualityHint = 1.0f;
 }
 
-bool S_LoadBuffer( sfx_t *sfx ) {
-	ALenum error;
-	void *data;
-	snd_info_t info;
-	ALuint format;
+struct BufferHolder {
+	ALuint buffer { 0 };
+	BufferHolder() {}
+	explicit BufferHolder( ALuint buffer_ ): buffer( buffer_ ) {}
+	~BufferHolder() {
+		if( buffer ) {
+			qalDeleteBuffers( 1, &buffer );
+		}
+	}
+	ALuint ReleaseOwnership() {
+		ALuint result = buffer;
+		buffer = 0;
+		return result;
+	}
+	operator bool() const {
+		return buffer != 0;
+	}
+	BufferHolder( const BufferHolder &that ) = delete;
+	BufferHolder &operator=( const BufferHolder &that ) = delete;
+	BufferHolder( BufferHolder &&that ) = delete;
+	BufferHolder &operator=( BufferHolder &&that ) = delete;
+};
 
+static ALuint S_BindBufferData( const char *tag, const snd_info_t &info, const void *data );
+
+namespace std {
+	void swap( BufferHolder &a, BufferHolder &b ) {
+		std::swap( a.buffer, b.buffer );
+	}
+}
+
+bool S_LoadBuffer( sfx_t *sfx ) {
 	if( !sfx ) {
 		return false;
 	}
@@ -197,54 +229,59 @@ bool S_LoadBuffer( sfx_t *sfx ) {
 		return false;
 	}
 
-	data = S_LoadSound( sfx->filename, &info );
-	if( !data ) {
+	struct CallSFree {
+		void operator()( void *p ) {
+			if( p ) {
+				S_Free( p );
+			}
+		}
+	};
+
+	using DataHolder = std::unique_ptr<void, CallSFree>;
+
+	snd_info_t fileInfo;
+	DataHolder fileData( S_LoadSound( sfx->filename, &fileInfo ) );
+	if( !fileData ) {
 		//Com_DPrintf( "Couldn't load %s\n", sfx->filename );
 		return false;
 	}
 
-	if( info.channels > 1 ) {
-		void *temp = stereo_mono( data, &info );
-		if( temp ) {
-			S_Free( data );
-			data = temp;
+	snd_info_t monoInfo, stereoInfo;
+	DataHolder monoData, stereoData;
+	BufferHolder stereoBuffer;
+	if( fileInfo.channels < 2 ) {
+		std::swap( fileData, monoData );
+		monoInfo = fileInfo;
+		assert( monoData.get() && !fileData.get() );
+	} else {
+		monoInfo = stereoInfo = fileInfo;
+		// Puf file data to stereo data
+		std::swap( fileData, stereoData );
+		BufferHolder tmpBuffer( S_BindBufferData( sfx->filename, stereoInfo, stereoData.get() ) );
+		if( !tmpBuffer ) {
+			return false;
 		}
-	}
-
-	format = S_SoundFormat( info.width, info.channels );
-
-	qalGenBuffers( 1, &sfx->buffer );
-	if( ( error = qalGetError() ) != AL_NO_ERROR ) {
-		S_Free( data );
-		Com_Printf( "Couldn't create a sound buffer for %s (%s)\n", sfx->filename, S_ErrorMessage( error ) );
-		return false;
-	}
-
-	qalBufferData( sfx->buffer, format, data, info.size, info.rate );
-	error = qalGetError();
-
-	// If we ran out of memory, start evicting the least recently used sounds
-	while( error == AL_OUT_OF_MEMORY ) {
-		if( !buffer_evict() ) {
-			S_Free( data );
-			Com_Printf( "Out of memory loading %s\n", sfx->filename );
+		std::swap( stereoBuffer, tmpBuffer );
+		DataHolder resampledData( stereo_mono( stereoData.get(), &monoInfo ) );
+		if( !resampledData.get() ) {
+			Com_Printf( "Can't resample stereo to mono for %s\n", sfx->filename );
 			return false;
 		}
 
-		// Try load it again
-		qalGetError();
-		qalBufferData( sfx->buffer, format, data, info.size, info.rate );
-		error = qalGetError();
+		// Put resampled data to mono data
+		std::swap( monoData, resampledData );
+		assert( stereoData.get() && !fileData.get() );
+		assert( monoData.get() && !resampledData.get() );
 	}
 
-	// Some other error condition
-	if( error != AL_NO_ERROR ) {
-		S_Free( data );
-		Com_Printf( "Couldn't fill sound buffer for %s (%s)", sfx->filename, S_ErrorMessage( error ) );
+	BufferHolder monoBuffer( S_BindBufferData( sfx->filename, monoInfo, monoData.get() ) );
+	if( !monoBuffer ) {
 		return false;
 	}
 
-	S_Free( data );
+	sfx->buffer = monoBuffer.ReleaseOwnership();
+	sfx->stereoBuffer = stereoBuffer.ReleaseOwnership();
+
 	sfx->inMemory = true;
 
 	if( s_environment_effects->integer ) {
@@ -254,6 +291,40 @@ bool S_LoadBuffer( sfx_t *sfx ) {
 	return true;
 }
 
+static ALuint S_BindBufferData( const char *tag, const snd_info_t &info, const void *data ) {
+	ALenum error;
+	ALuint buffer;
+	ALenum format = S_SoundFormat( info.width, info.channels );
+	qalGenBuffers( 1, &buffer );
+	if( ( error = qalGetError() ) != AL_NO_ERROR ) {
+		Com_Printf( "Couldn't create a sound buffer for %s (%s)\n", tag, S_ErrorMessage( error ) );
+		return 0;
+	}
+
+	qalBufferData( buffer, format, data, info.size, info.rate );
+	error = qalGetError();
+
+	// If we ran out of memory, start evicting the least recently used sounds
+	while( error == AL_OUT_OF_MEMORY ) {
+		if( !buffer_evict() ) {
+			Com_Printf( "Out of memory loading %s\n", tag );
+			return 0;
+		}
+
+		// Try load it again
+		qalGetError();
+		qalBufferData( buffer, format, data, info.size, info.rate );
+		error = qalGetError();
+	}
+
+	// Some other error condition
+	if( error != AL_NO_ERROR ) {
+		Com_Printf( "Couldn't fill sound buffer for %s (%s)", tag, S_ErrorMessage( error ) );
+		return 0;
+	}
+
+	return buffer;
+}
 /*
 * Sound system wide functions (snd_al_local.h)
 */
@@ -354,9 +425,6 @@ void S_UseBuffer( sfx_t *sfx ) {
 	sfx->used = trap_Milliseconds();
 }
 
-ALuint S_GetALBuffer( const sfx_t *sfx ) {
-	return sfx->buffer;
-}
 
 /**
 * Global functions (sound.h)

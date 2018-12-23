@@ -57,13 +57,13 @@ static void S_AdjustGain( src_t *src ) {
 /*
 * source_setup
 */
-static void source_setup( src_t *src, sfx_t *sfx, int priority, int entNum, int channel, float fvol, float attenuation ) {
+static void source_setup( src_t *src, sfx_t *sfx, bool forceStereo, int priority, int entNum, int channel, float fvol, float attenuation ) {
 	ALuint buffer = 0;
 
 	// Mark the SFX as used, and grab the raw AL buffer
 	if( sfx ) {
 		S_UseBuffer( sfx );
-		buffer = S_GetALBuffer( sfx );
+		buffer = forceStereo && sfx->stereoBuffer ? sfx->stereoBuffer : sfx->buffer;
 	}
 
 	clamp_low( attenuation, 0.0f );
@@ -206,7 +206,7 @@ static void source_loop( int priority, sfx_t *sfx, int entNum, float fvol, float
 	}
 
 	if( new_source ) {
-		source_setup( src, sfx, priority, entNum, -1, fvol, attenuation );
+		source_setup( src, sfx, false, priority, entNum, -1, fvol, attenuation );
 		qalSourcei( src->source, AL_LOOPING, AL_TRUE );
 		src->isLooping = true;
 
@@ -752,7 +752,7 @@ void S_StartLocalSound( sfx_t *sfx, float fvol ) {
 
 	S_UseBuffer( sfx );
 
-	source_setup( src, sfx, SRCPRI_LOCAL, -1, 0, fvol, ATTN_NONE );
+	source_setup( src, sfx, true, SRCPRI_LOCAL, -1, 0, fvol, ATTN_NONE );
 	qalSourcei( src->source, AL_SOURCE_RELATIVE, AL_TRUE );
 
 	qalSourcePlay( src->source );
@@ -773,7 +773,7 @@ static void S_StartSound( sfx_t *sfx, const vec3_t origin, int entNum, int chann
 		return;
 	}
 
-	source_setup( src, sfx, SRCPRI_ONESHOT, entNum, channel, fvol, attenuation );
+	source_setup( src, sfx, false, SRCPRI_ONESHOT, entNum, channel, fvol, attenuation );
 
 	if( src->attenuation ) {
 		if( origin ) {
@@ -831,7 +831,7 @@ src_t *S_AllocRawSource( int entNum, float fvol, float attenuation, cvar_t *volu
 		return NULL;
 	}
 
-	source_setup( src, NULL, SRCPRI_STREAM, entNum, 0, fvol, attenuation );
+	source_setup( src, NULL, false, SRCPRI_STREAM, entNum, 0, fvol, attenuation );
 
 	if( src->attenuation && entNum > 0 ) {
 		src->isTracking = true;

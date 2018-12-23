@@ -75,13 +75,12 @@ extern struct mempool_s *soundpool;
 #endif
 
 typedef struct sfx_s {
-	int id;
 	char filename[MAX_QPATH];
+	int64_t used;           // Time last used
+	int id;
 	int registration_sequence;
 	ALuint buffer;      // OpenAL buffer
-	bool inMemory;
-	bool isLocked;
-	int used;           // Time last used
+	ALuint stereoBuffer;
 	float qualityHint;  // Assumed to be in [0, 1] range for majority of sounds
 						// (but values exceeding this range are allowed),
 						// spammy sounds like ricochets, plasma explosions,
@@ -89,6 +88,8 @@ typedef struct sfx_s {
 						// Should not be treated as generic gameplay importance of the sound,
 						// but as a hint allowing lowering quality of sound processing for saving performance
 						// (the sound will remain playing but in low quality, without effects, etc).
+	bool inMemory;
+	bool isLocked;
 } sfx_t;
 
 extern cvar_t *s_volume;
@@ -175,10 +176,8 @@ void S_InitBuffers( void );
 void S_ShutdownBuffers( void );
 void S_SoundList_f( void );
 void S_UseBuffer( sfx_t *sfx );
-ALuint S_GetALBuffer( const sfx_t *sfx );
 sfx_t *S_FindBuffer( const char *filename );
 void S_MarkBufferFree( sfx_t *sfx );
-sfx_t *S_FindFreeBuffer( void );
 void S_ForEachBuffer( void ( *callback )( sfx_t *sfx ) );
 sfx_t *S_GetBufferById( int id );
 bool S_LoadBuffer( sfx_t *sfx );
