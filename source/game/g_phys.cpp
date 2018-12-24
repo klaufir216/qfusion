@@ -859,7 +859,6 @@ static void SV_Physics_Toss( edict_t *ent ) {
 void SV_Physics_LinearProjectile( edict_t *ent ) {
 	vec3_t start, end;
 	int mask;
-	float flyTime;
 	trace_t trace;
 	int old_waterLevel;
 
@@ -872,11 +871,12 @@ void SV_Physics_LinearProjectile( edict_t *ent ) {
 
 	mask = ( ent->r.clipmask ) ? ent->r.clipmask : MASK_SOLID;
 
-	// find it's current position given the starting timeStamp
-	flyTime = (float)( game.serverTime - ent->s.linearMovementTimeStamp ) * 0.001f;
+	const float startLineParam = ( ent->s.linearMovementOldTimeStamp - ent->s.linearMovementTimeStamp ) * 0.001f;
+	ent->s.linearMovementOldTimeStamp = ent->s.linearMovementTimeStamp;
+	const float endLineParam = ( game.serverTime - ent->s.linearMovementTimeStamp ) * 0.001f;
 
-	VectorCopy( ent->s.linearMovementBegin, start );
-	VectorMA( ent->s.linearMovementBegin, flyTime, ent->s.linearMovementVelocity, end );
+	VectorMA( ent->s.linearMovementBegin, startLineParam, ent->s.linearMovementVelocity, start );
+	VectorMA( ent->s.linearMovementBegin, endLineParam, ent->s.linearMovementVelocity, end );
 
 	G_Trace4D( &trace, start, ent->r.mins, ent->r.maxs, end, ent, mask, ent->timeDelta );
 	VectorCopy( trace.endpos, ent->s.origin );
