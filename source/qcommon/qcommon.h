@@ -871,12 +871,14 @@ CPU FEATURES
 
 // Query only features that seem to have some utility for the code base
 
-#define QF_CPU_FEATURE_SSE2    ( 0x1 )
-#define QF_CPU_FEATURE_SSE41   ( 0x2 )
-#define QF_CPU_FEATURE_SSE42   ( 0x4 )
-#define QF_CPU_FEATURE_AVX     ( 0x8 )
+#define Q_CPU_FEATURE_SSE2    ( 0x1u )
+#define Q_CPU_FEATURE_SSE41   ( 0x2u )
+#define Q_CPU_FEATURE_SSE42   ( 0x4u )
+#define Q_CPU_FEATURE_AVX     ( 0x8u )
 
-unsigned int COM_CPUFeatures( void );
+unsigned Sys_GetProcessorFeatures();
+
+bool Sys_GetNumberOfProcessors( unsigned *physical, unsigned *logical );
 
 /*
 ==============================================================

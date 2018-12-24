@@ -227,25 +227,6 @@ static const char *CL_SoundModule_GetConfigString( int index ) {
 	return cl.configstrings[index];
 }
 
-#ifndef __MINGW32__
-#include <thread>
-#endif
-
-// TODO: This is a dirty hack to get things compiling/working!
-// Should be fused with CPU feature detection
-// and actually make a distinction between physical and logical cores
-static bool Sys_GetNumberOfProcessors( unsigned *physical, unsigned *logical ) {
-#ifndef __MINGW32__
-	Com_Printf( S_COLOR_RED "Sys_GetNumberOfProcessors(): FIXME unaware of logical/physical cores distinction!" );
-	unsigned num = std::max( std::thread::hardware_concurrency(), 1u );
-#else
-	Com_Printf( S_COLOR_RED "Sys_GetNumberOfProcessors(): FIXME MinGW stub!" );
-	unsigned num = 4;
-#endif
-	*physical = *logical = num;
-	return true;
-}
-
 /*
 * CL_SoundModule_Init
 */

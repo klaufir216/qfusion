@@ -47,7 +47,7 @@ struct CMTraceComputer *CM_GetTraceComputer( cmodel_state_t *cms ) {
 		return selectedTraceComputer;
 	}
 
-	if( COM_CPUFeatures() & QF_CPU_FEATURE_SSE42 ) {
+	if( Sys_GetProcessorFeatures() & Q_CPU_FEATURE_SSE42 ) {
 		Com_Printf( "SSE4.2 instructions are supported. An optimized collision code will be used\n" );
 		selectedTraceComputer = &sse42TraceComputer;
 	} else {
