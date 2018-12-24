@@ -279,7 +279,8 @@ extern "C" {
 #define S_HIT_WATER     "sounds/misc/hit_water"
 
 #define S_PLAYER_RESPAWN "sounds/world/player_respawn"
-#define S_TELEPORT      "sounds/world/tele_in"
+#define S_TELEPORT_IN    "sounds/world/tele_in"
+#define S_TELEPORT_OUT   "sounds/world/tele_out"
 #define S_JUMPPAD       "sounds/world/jumppad"
 #define S_LAUNCHPAD     "sounds/world/launchpad"
 

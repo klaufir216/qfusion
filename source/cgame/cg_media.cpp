@@ -81,8 +81,8 @@ void CG_RegisterMediaSounds( void ) {
 
 	cgs.media.sfxItemRespawn = CG_RegisterMediaSfx( S_ITEM_RESPAWN, true );
 	cgs.media.sfxPlayerRespawn = CG_RegisterMediaSfx( S_PLAYER_RESPAWN, true );
-	cgs.media.sfxTeleportIn = CG_RegisterMediaSfx( S_TELEPORT, true );
-	cgs.media.sfxTeleportOut = CG_RegisterMediaSfx( S_TELEPORT, true );
+	cgs.media.sfxTeleportIn = CG_RegisterMediaSfx( S_TELEPORT_IN, true );
+	cgs.media.sfxTeleportOut = CG_RegisterMediaSfx( S_TELEPORT_OUT, true );
 
 	//	cgs.media.sfxJumpPad = CG_RegisterMediaSfx ( S_JUMPPAD, true );
 	cgs.media.sfxShellHit = CG_RegisterMediaSfx( S_SHELL_HIT, true );
