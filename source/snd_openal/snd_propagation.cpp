@@ -2182,7 +2182,7 @@ bool GraphBuilder<AdjacencyListType, DistanceType>::TryUsingGlobalGraph( TargetT
 	}
 
 	globalGraph->EnsureValid();
-	if( globalGraph->IsUsingValidData() ) {
+	if( !globalGraph->IsUsingValidData() ) {
 		return false;
 	}
 

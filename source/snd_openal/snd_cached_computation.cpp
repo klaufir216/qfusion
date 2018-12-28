@@ -30,6 +30,7 @@ void CachedComputation::EnsureValid() {
 	// If it was a custom map a user has loaded once, results are expected to be under the cache directory.
 	for( int fsFlags : { FS_READ, ( FS_READ | FS_CACHE ) } ) {
 		if( TryReadFromFile( fsFlags ) ) {
+			isUsingValidData = true;
 			CommitUpdate();
 			return;
 		}
