@@ -349,12 +349,7 @@ static void CG_FireWeaponEvent( int entNum, int weapon, int fireMode ) {
 
 	if( sound ) {
 		if( ISVIEWERENTITY( entNum ) ) {
-			// Wsw: Hack for new LG and MG sounds (they interfere with hit beeps being too loud for a 1-st person)
-			if( weapon == WEAP_LASERGUN || weapon == WEAP_MACHINEGUN ) {
-				trap_S_StartGlobalSound( sound, CHAN_MUZZLEFLASH, 0.5f * cg_volume_effects->value );
-			} else {
-				trap_S_StartGlobalSound( sound, CHAN_MUZZLEFLASH, cg_volume_effects->value );
-			}
+			trap_S_StartGlobalSound( sound, CHAN_MUZZLEFLASH, cg_volume_effects->value );
 		} else {
 			// fixed position is better for location, but the channels are used from worldspawn
 			// and openal runs out of channels quick on cheap cards. Relative sound uses per-entity channels.
