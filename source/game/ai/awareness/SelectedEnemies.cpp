@@ -501,7 +501,7 @@ bool SelectedEnemies::TestAboutToHitEBorIG( int64_t levelTime ) const {
 	trace_t trace;
 	const auto *pvsCache = EntitiesPvsCache::Instance();
 	const auto *const viewDots = GetEnemyViewDirDotToBotDirValues();
-	for( int i = 0; i < activeEnemies.size(); ++i ) {
+	for( unsigned i = 0; i < activeEnemies.size(); ++i ) {
 		const auto *const enemy = activeEnemies[i];
 		if( !enemy->IsShootableCurrOrPendingWeapon( WEAP_ELECTROBOLT ) ) {
 			if( !enemy->IsShootableCurrOrPendingWeapon( WEAP_INSTAGUN ) ) {
@@ -572,7 +572,7 @@ bool SelectedEnemies::TestAboutToHitLGorPG( int64_t levelTime ) const {
 	const auto *pvsCache = EntitiesPvsCache::Instance();
 	const auto *const viewDots = GetEnemyViewDirDotToBotDirValues();
 	constexpr float squareDistanceThreshold = WorldState::MIDDLE_RANGE_MAX * WorldState::MIDDLE_RANGE_MAX;
-	for( int i = 0; i < activeEnemies.size(); ++i ) {
+	for( unsigned i = 0; i < activeEnemies.size(); ++i ) {
 		const auto *const enemy = activeEnemies[i];
 		// Skip enemies that are out of LG range. (Consider PG to be inefficient outside of this range too)
 		if( enemy->LastSeenOrigin().SquareDistanceTo( self->s.origin ) > squareDistanceThreshold ) {
@@ -615,7 +615,7 @@ bool SelectedEnemies::TestAboutToHitRLorSW( int64_t levelTime ) const {
 	trace_t trace;
 	const auto *pvsCache = EntitiesPvsCache::Instance();
 	const auto *const viewDots = GetEnemyViewDirDotToBotDirValues();
-	for( int i = 0; i < activeEnemies.size(); ++i ) {
+	for( unsigned i = 0; i < activeEnemies.size(); ++i ) {
 		const auto *const enemy = activeEnemies[i];
 
 		float distanceThreshold = 512.0f;

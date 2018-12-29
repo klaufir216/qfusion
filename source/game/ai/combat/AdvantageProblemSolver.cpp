@@ -71,6 +71,8 @@ SpotsAndScoreVector &AdvantageProblemSolver::SelectCandidateSpots( const SpotsQu
 
 SpotsAndScoreVector &AdvantageProblemSolver::CheckOriginVisibility( SpotsAndScoreVector &reachCheckedSpots,
 																	int maxSpots ) {
+	assert( maxSpots >= 0 );
+
 	edict_t *passent = const_cast<edict_t*>( originParams.originEntity );
 	edict_t *keepVisibleEntity = const_cast<edict_t *>( problemParams.keepVisibleEntity );
 	Vec3 entityOrigin( problemParams.keepVisibleOrigin );
@@ -123,7 +125,7 @@ pvsTestPassed:
 
 		result.push_back( spotAndScore );
 		// Stop immediately after we have reached the needed spots count
-		if( result.size() == maxSpots ) {
+		if( (int)result.size() == maxSpots ) {
 			break;
 		}
 	}

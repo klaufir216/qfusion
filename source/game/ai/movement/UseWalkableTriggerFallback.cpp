@@ -47,7 +47,7 @@ MovementFallback *FallbackMovementAction::TryFindWalkableTriggerFallback( Contex
 
 const edict_t *FallbackMovementAction::FindClosestToTargetTrigger( Context *context ) {
 	const auto &entityPhysicsState = context->movementState->entityPhysicsState;
-	int fromAreaNums[2];
+	int fromAreaNums[2] { 0, 0 };
 	int numFromAreas = entityPhysicsState.PrepareRoutingStartAreas( fromAreaNums );
 	int goalAreaNum = context->NavTargetAasAreaNum();
 	ClosestTriggerProblemParams problemParams( entityPhysicsState.Origin(), fromAreaNums, numFromAreas, goalAreaNum );
@@ -99,7 +99,6 @@ const edict_t *FallbackMovementAction::FindClosestToTargetTrigger( const Closest
 
 	int bestTravelTimeFromTrigger = std::numeric_limits<int>::max();
 	int bestTriggerIndex = -1;
-	int bestTriggerAreaNum = 0;
 
 	trace_t trace;
 	vec3_t traceMins, traceMaxs;
@@ -149,7 +148,6 @@ const edict_t *FallbackMovementAction::FindClosestToTargetTrigger( const Closest
 
 		bestTriggerIndex = i;
 		bestTravelTimeFromTrigger = travelTimeFromTrigger;
-		bestTriggerAreaNum = entAreaNum;
 	}
 
 	if( bestTriggerIndex >= 0 ) {

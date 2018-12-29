@@ -596,7 +596,7 @@ void AiManager::FindHubAreas() {
 
 	std::sort( bestAreasHeap.begin(), bestAreasHeap.end() );
 
-	for( int i = 0; i < bestAreasHeap.size(); ++i ) {
+	for( unsigned i = 0; i < bestAreasHeap.size(); ++i ) {
 		this->hubAreas[i] = bestAreasHeap[i].areaNum;
 	}
 

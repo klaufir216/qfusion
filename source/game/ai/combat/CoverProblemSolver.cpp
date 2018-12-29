@@ -12,13 +12,15 @@ int CoverProblemSolver::FindMany( vec3_t *spots, int maxSpots ) {
 }
 
 SpotsAndScoreVector &CoverProblemSolver::SelectCoverSpots( const SpotsAndScoreVector &reachCheckedSpots, int maxSpots ) {
+	assert( maxSpots >= 0 );
+
 	auto &result = tacticalSpotsRegistry->temporariesAllocator.GetNextCleanSpotsAndScoreVector();
 	for( const SpotAndScore &spotAndScore: reachCheckedSpots ) {
 		if( !LooksLikeACoverSpot( spotAndScore.spotNum ) ) {
 			continue;
 		}
 		result.push_back( spotAndScore );
-		if( result.size() == maxSpots ) {
+		if( (int)result.size() == maxSpots ) {
 			break;
 		}
 	}

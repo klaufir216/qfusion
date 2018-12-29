@@ -831,7 +831,7 @@ inline float WorldState::OriginVar::DistanceTo( const OriginVar &that ) const {
 
 inline WorldState::OriginVar &WorldState::OriginVar::SetSatisfyOp( WorldState::SatisfyOp op, float epsilon ) {
 #ifdef _DEBUG
-	if( op != SatisfyOp::EQ && op != SatisfyOp::NE ) {
+	if( op != WorldState::SatisfyOp::EQ && op != WorldState::SatisfyOp::NE ) {
 		AI_FailWith( "OriginVar::SetSatisfyOp()", "Illegal satisfy op %d for this kind of var\n", (int)op );
 	}
 	if( epsilon < 4.0f || epsilon >= 1024.0f ) {

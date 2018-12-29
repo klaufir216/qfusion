@@ -202,13 +202,15 @@ void JumpToSpotFallback::SetupMovement( Context *context ) {
 		// Try using a cheating acceleration
 		Vec3 forwardDir( entityPhysicsState.ForwardDir() );
 		// Check whether the bot is not leaning too hard to avoid weird-looking movement
-		if( fabsf( forwardDir.Z() ) < 0.3f & DistanceSquared( entityPhysicsState.Origin(), targetOrigin ) > SQUARE( 48 ) ) {
-			forwardDir.Z() = 0;
-			forwardDir.NormalizeFast();
-			if( toTargetDir.Dot( forwardDir ) > 0.9f ) {
-				Vec3 modifiedVelocity( forwardDir );
-				modifiedVelocity *= context->GetRunSpeed();
-				context->record->SetModifiedVelocity( modifiedVelocity );
+		if( fabsf( forwardDir.Z() ) < 0.3f ) {
+			if( DistanceSquared( entityPhysicsState.Origin(), targetOrigin ) > SQUARE( 48 ) ) {
+				forwardDir.Z() = 0;
+				forwardDir.NormalizeFast();
+				if( toTargetDir.Dot( forwardDir ) > 0.9f ) {
+					Vec3 modifiedVelocity( forwardDir );
+					modifiedVelocity *= context->GetRunSpeed();
+					context->record->SetModifiedVelocity( modifiedVelocity );
+				}
 			}
 		}
 	}
@@ -592,7 +594,6 @@ MovementFallback *FallbackMovementAction::TryFindJumpLikeReachFallback( Context 
 	AiTrajectoryPredictor::Results predictionResults;
 
 	vec3_t jumpTarget;
-	int jumpTargetAreaNum = 0;
 
 	int i = 0;
 	for(; i < numAttempts; ++i ) {
@@ -612,7 +613,6 @@ MovementFallback *FallbackMovementAction::TryFindJumpLikeReachFallback( Context 
 		// A trajectory has hit the target area
 		if( stopEvents & AiTrajectoryPredictor::ENTER_AREA_NUM ) {
 			VectorCopy( nextReach.end, jumpTarget );
-			jumpTargetAreaNum = nextReach.areanum;
 			break;
 		}
 
@@ -639,7 +639,6 @@ MovementFallback *FallbackMovementAction::TryFindJumpLikeReachFallback( Context 
 		}
 
 		VectorCopy( predictionResults.origin, jumpTarget );
-		jumpTargetAreaNum = landingArea;
 		break;
 	}
 

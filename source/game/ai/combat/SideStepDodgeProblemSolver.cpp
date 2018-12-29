@@ -49,7 +49,7 @@ bool SideStepDodgeProblemSolver::FindSingle( vec_t *spotOrigin ) {
 	if( const auto *originEntity = originParams.originEntity ) {
 		if( originEntity->ai && originEntity->ai->botRef ) {
 			const auto &entityPhysicsState = originEntity->ai->botRef->EntityPhysicsState();
-			int areaNums[2];
+			int areaNums[2] { 0, 0 };
 			entityPhysicsState->PrepareRoutingStartAreas( areaNums );
 			testedAreaNum = areaNums[0];
 			if( !originEntity->groundentity ) {
@@ -79,7 +79,7 @@ bool SideStepDodgeProblemSolver::FindSingle( vec_t *spotOrigin ) {
 	edict_t *const ignore = originParams.originEntity ? const_cast<edict_t *>( originParams.originEntity ) : nullptr;
 
 	float bestScore = -1.0f;
-	vec3_t bestVec;
+	vec3_t bestVec { 0, 0, 0 };
 
 	const auto *const aasWorld = AiAasWorld::Instance();
 	// Check whether a computation of this area num has been deferred
@@ -154,7 +154,7 @@ bool SideStepDodgeProblemSolver::FindSingle( vec_t *spotOrigin ) {
 	}
 
 	bestScore = -1.0f;
-	vec3_t bestDir;
+	vec3_t bestDir { 0, 0, 0 };
 
 	const float dx = playerbox_stand_maxs[0] - playerbox_stand_mins[0];
 	const float dy = playerbox_stand_maxs[1] - playerbox_stand_mins[1];

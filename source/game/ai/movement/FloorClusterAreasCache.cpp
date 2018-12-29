@@ -209,7 +209,7 @@ void FloorClusterAreasCache::PrepareAreasForSmallCluster( MovementPredictionCont
 														  int numClusterAreas,
 														  CandidateAreasHeap &__restrict result ) const {
 	// Prevent misusing
-	assert( result.empty() && result.capacity() >= numClusterAreas );
+	assert( result.empty() && numClusterAreas >= 0 && (int)result.capacity() >= numClusterAreas );
 
 	const auto *__restrict aasAreas = aasWorld->Areas();
 	const auto *__restrict routeCache = bot->RouteCache();
@@ -257,7 +257,7 @@ void FloorClusterAreasCache::PrepareAreasForLargeCluster( MovementPredictionCont
 														  int numClusterAreas,
 														  CandidateAreasHeap &__restrict result ) const {
 	// Prevent misusing
-	assert( result.empty() && result.capacity() < numClusterAreas );
+	assert( result.empty() && numClusterAreas >= 0 && (int)result.capacity() < numClusterAreas );
 
 	const auto *__restrict aasAreas = aasWorld->Areas();
 	const auto *__restrict routeCache = bot->RouteCache();
@@ -335,7 +335,9 @@ void FloorClusterAreasCache::BuildCandidateAreasHeap( MovementPredictionContext 
 		hazard = nullptr;
 	}
 
-	if( numClusterAreas <= HEAP_SIZE ) {
+	assert( numClusterAreas >= 0 );
+	static_assert( !std::is_signed<decltype( HEAP_SIZE )>::value, "Remove this fruitless cast" );
+	if( numClusterAreas <= (int)HEAP_SIZE ) {
 		PrepareAreasForSmallCluster( context, hazard, maxTravelTimeThreshold, clusterAreaNums, numClusterAreas, result );
 	} else {
 		PrepareAreasForLargeCluster( context, hazard, maxTravelTimeThreshold, clusterAreaNums, numClusterAreas, result );

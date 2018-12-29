@@ -1701,7 +1701,7 @@ void AiAasWorld::ComputeLogicalAreaClusters() {
 		floorData.Add( clusterAreaNums, numClusterAreas );
 	}
 
-	assert( numFloorClusters == floorDataOffsets.Size() );
+	assert( numFloorClusters == (int)floorDataOffsets.Size() );
 	this->floorClusterDataOffsets = floorDataOffsets.FlattenResult();
 	// Clear as no longer needed immediately for same reasons
 	floorDataOffsets.Clear();
@@ -1746,7 +1746,7 @@ void AiAasWorld::ComputeLogicalAreaClusters() {
 	// Clear as no longer needed to provide free space for further allocations
 	G_LevelFree( floodResultsBuffer );
 
-	assert( numStairsClusters == stairsDataOffsets.Size() );
+	assert( numStairsClusters == (int)stairsDataOffsets.Size() );
 	this->stairsClusterDataOffsets = stairsDataOffsets.FlattenResult();
 	stairsDataOffsets.Clear();
 	this->stairsClusterData = stairsData.FlattenResult();
@@ -2079,20 +2079,23 @@ const char *AiAasWorld::MakeFileName( const ArrayRange<char> &strippedName, cons
 	const char *newPrefix = "ai/";
 	const auto newPrefixLen = strlen( newPrefix );
 	char *p = buffer;
-	if( newPrefixLen > MAX_QPATH - ( p - buffer ) ) {
+	if( (ptrdiff_t)newPrefixLen > MAX_QPATH - ( p - buffer ) ) {
 		return buffer;
 	}
+
 	memcpy( p, newPrefix, newPrefixLen );
 	p += newPrefixLen;
-	if( strippedName.size() > MAX_QPATH - ( p  - buffer ) ) {
+	if( (ptrdiff_t)strippedName.size() > MAX_QPATH - ( p  - buffer ) ) {
 		return buffer;
 	}
+
 	memcpy( p, strippedName.begin(), strippedName.size() );
 	p += strippedName.size();
 	const auto extensionLen = strlen( extension );
-	if( extensionLen + 1 > MAX_QPATH - ( p - buffer ) ) {
+	if( (ptrdiff_t)( extensionLen + 1 ) > MAX_QPATH - ( p - buffer ) ) {
 		return buffer;
 	}
+
 	memcpy( p, extension, extensionLen + 1 );
 	assert( p[extensionLen] == '\0' );
 	return buffer;
@@ -2349,12 +2352,13 @@ public:
 	}
 
 	const bool *Row( int areaNum ) const {
-		assert( (unsigned)( areaNum + elemOffset ) < rowSize );
+		assert( areaNum + elemOffset >= 0 );
+		assert( areaNum + elemOffset < rowSize );
 		return &table[rowSize * ( areaNum + elemOffset )];
 	}
 
 	int ListSize( int areaNum ) const {
-		assert( (unsigned)areaNum < rowSize - elemOffset );
+		assert( areaNum >= 0 && areaNum < rowSize - elemOffset );
 		return listSizes[areaNum];
 	};
 };

@@ -639,8 +639,8 @@ FreelistPool::FreelistPool( void *buffer_, size_t bufferSize, size_t blockSize_ 
 	for( unsigned i = 1; i < maxBlocks - 1; ++i ) {
 		nextBlockPtr += stride;
 		nextBlock = (BlockHeader *)nextBlockPtr;
-		assert( (uint8_t *)currBlock - (uint8_t *)prevBlock == stride );
-		assert( (uint8_t *)nextBlock - (uint8_t *)currBlock == stride );
+		assert( (uint8_t *)currBlock - (uint8_t *)prevBlock == (ptrdiff_t)stride );
+		assert( (uint8_t *)nextBlock - (uint8_t *)currBlock == (ptrdiff_t)stride );
 		currBlock->prev[0] = prevBlock;
 		currBlock->next[0] = nextBlock;
 		prevBlock = currBlock;

@@ -21,7 +21,7 @@ static int GetBestConformingToDirArea( const ReachChainInterpolator &interpolato
 
 	int bestArea = 0;
 	float bestDot = -1.0f;
-	for( int i = 0; i < interpolator.dirs.size(); ++i ) {
+	for( unsigned i = 0; i < interpolator.dirs.size(); ++i ) {
 		float dot = interpolator.dirs[i].Dot( pivotDir );
 		if( dot > bestDot ) {
 			bestArea = interpolator.dirsAreas[i];

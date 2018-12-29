@@ -54,7 +54,7 @@ bool AiPrecomputedFileReader::ReadLengthAndData( uint8_t **data, uint32_t *dataL
 		return false;
 	}
 
-	if( trap_FS_Read( mem, length, fp ) != length ) {
+	if( trap_FS_Read( mem, length, fp ) != (int)length ) {
 		G_Printf( S_COLOR_RED "%s: Can't read %d chunk bytes\n", tag, (int)length );
 		if( freeFn ) {
 			freeFn( mem );
