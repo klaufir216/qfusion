@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "server.h"
+#include "../qcommon/snap_tables.h"
 
 static bool sv_initialized = false;
 
@@ -741,6 +742,12 @@ void SV_Frame( unsigned realmsec, unsigned gamemsec ) {
 
 	// let everything in the world think and move
 	if( SV_RunGameFrame( gamemsec ) ) {
+		// CAUTION! This is important.
+		// The game has built snapshots if we have entered this branch.
+		// Clear tables once and then reuse cached results for sending client messages and writing demos.
+		SnapVisTable::Instance()->Clear();
+		SnapShadowTable::Instance()->Clear();
+
 		// send messages back to the clients that had packets read this frame
 		SV_SendClientMessages();
 
@@ -1037,6 +1044,10 @@ void SV_Shutdown( const char *finalmsg ) {
 	}
 	sv_initialized = false;
 
+	// This is safe to call multiple times
+	SnapShadowTable::Shutdown();
+	SnapVisTable::Shutdown();
+
 	SV_Web_Shutdown();
 	ML_Shutdown();
 	SV_MM_Shutdown( true );
@@ -1045,4 +1056,14 @@ void SV_Shutdown( const char *finalmsg ) {
 	SV_ShutdownOperatorCommands();
 
 	Mem_FreePool( &sv_mempool );
+}
+
+void SV_SetupSnapTables( cmodel_state_t *cms ) {
+	assert( cms );
+
+	SnapShadowTable::Shutdown();
+	SnapVisTable::Shutdown();
+
+	SnapVisTable::Init( cms );
+	SnapShadowTable::Init();
 }

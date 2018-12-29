@@ -19,6 +19,9 @@
  */
 // server.h
 
+#ifndef QFUSION_SERVER_H
+#define QFUSION_SERVER_H
+
 #include "../qcommon/qcommon.h"
 #include "../game/g_public.h"
 #include "../matchmaker/mm_rating.h"
@@ -462,7 +465,11 @@ typedef struct {
 void SV_FlushRedirect( int sv_redirected, const char *outputbuf, const void *extra );
 void SV_SendClientMessages( void );
 
-void SV_Multicast( vec3_t origin, multicast_t to );
+/**
+ * Just a workaround to prevent inclusion of tables headers in other parts of server code than {@code sv_main.cpp}.
+ * @param cms a CM for a newly loaded map
+ */
+void SV_SetupSnapTables( cmodel_state_t *cms );
 
 #ifndef _MSC_VER
 void SV_BroadcastCommand( const char *format, ... ) __attribute__( ( format( printf, 1, 2 ) ) );
@@ -572,3 +579,5 @@ const char *SV_Web_UpstreamBaseUrl( void );
 bool SV_Web_AddGameClient( const char *session, int clientNum, const netadr_t *netAdr );
 void SV_Web_RemoveGameClient( const char *session );
 void SV_Web_GameFrame( http_game_query_cb cb );
+
+#endif

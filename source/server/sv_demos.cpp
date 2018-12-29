@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "server.h"
+#include "../qcommon/snap_tables.h"
 
 #define SV_DEMO_DIR va( "demos/server%s%s", sv_demodir->string[0] ? "/" : "", sv_demodir->string[0] ? sv_demodir->string : "" )
 
@@ -183,6 +184,10 @@ void SV_Demo_Start_f( void ) {
 	svs.demo.basetime = svs.gametime;
 	svs.demo.localtime = time( NULL );
 	SV_Demo_WriteStartMessages();
+
+	// Clearing tables won't harm...
+	SnapVisTable::Instance()->Clear();
+	SnapShadowTable::Instance()->Clear();
 
 	// write one nodelta frame
 	svs.demo.client.nodelta = true;

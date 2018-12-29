@@ -276,6 +276,11 @@ static void SV_SpawnServer( const char *server, bool devmap ) {
 	// load and spawn all other entities
 	ge->InitLevel( sv.mapname, CM_EntityString( svs.cms ), CM_EntityStringLen( svs.cms ), 0, svs.gametime, svs.realtime );
 
+	// CAUTION: initialize tables before running game frames
+	// so we can safely read tables from the game module
+	// (if such syscalls are introduced and are very likely to be introduced)
+	SV_SetupSnapTables( svs.cms );
+
 	// run two frames to allow everything to settle
 	ge->RunFrame( svc.snapFrameTime, svs.gametime );
 	ge->RunFrame( svc.snapFrameTime, svs.gametime );

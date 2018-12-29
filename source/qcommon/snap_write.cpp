@@ -20,23 +20,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "qcommon.h"
 #include "snap_write.h"
+#include "snap_tables.h"
 #include "../gameshared/gs_public.h"
 #include "../gameshared/q_comref.h"
-
-// For every client contains an array of timestamps for entities.
-// Every timestamps array contains a frame timestamp when the entity was shadowed for a client.
-// Shadowing means providing fake/garbage data for clients
-// instead of real one if it won't break gameplay experience.
-static int64_t shadowedForClientAt[MAX_CLIENTS - 1][MAX_EDICTS];
-
-// Mark entity for shadowing
-static inline void SNAP_Shadow( const client_snapshot_t *frame, int entNum ) {
-	shadowedForClientAt[frame->ps->playerNum][entNum] = frame->sentTimeStamp;
-}
-
-static inline bool SNAP_IsShadowed( const client_snapshot_t *frame, int entNum ) {
-	return shadowedForClientAt[frame->ps->playerNum][entNum] == frame->sentTimeStamp;
-}
 
 static inline void SNAP_WriteDeltaEntity( msg_t *msg, const entity_state_t *from, const entity_state_t *to,
 										  const client_snapshot_t *frame, bool force ) {
@@ -45,7 +31,7 @@ static inline void SNAP_WriteDeltaEntity( msg_t *msg, const entity_state_t *from
 		return;
 	}
 
-	if( !SNAP_IsShadowed( frame, to->number ) ) {
+	if( !SnapShadowTable::Instance()->IsEntityShadowed( frame->ps->playerNum, to->number ) ) {
 		MSG_WriteDeltaEntity( msg, from, to, force );
 		return;
 	}
@@ -195,7 +181,7 @@ static void SNAP_WritePlayerstateToClient( msg_t *msg, const player_state_t *ops
 	memset( ps->inventory, 0, sizeof( backupInventory ) );
 
 	// Transmit fake/garbage data if the player entity would be culled if there were no attached events
-	if( SNAP_IsShadowed( frame, ps->playerNum + 1 ) ) {
+	if( SnapShadowTable::Instance()->IsEntityShadowed( frame->ps->playerNum, ps->playerNum + 1 ) ) {
 		for( int i = 0; i < 2; ++i ) {
 			ps->viewangles[i] = -180.0f + 360.0f * random();
 		}
@@ -550,193 +536,6 @@ static bool SNAP_ViewDirCullEntity( const edict_t *clent, const edict_t *ent ) {
 	return DotProduct( toEntDir, viewDir ) < 0;
 }
 
-static bool SNAP_Raycast( cmodel_state_t *cms, trace_t *trace, const vec3_t from, const vec3_t to ) {
-	CM_TransformedBoxTrace( cms, trace, (float *)from, (float *)to, vec3_origin, vec3_origin, NULL, MASK_SOLID, NULL, NULL );
-
-	if( trace->fraction == 1.0f ) {
-		return true;
-	}
-
-	if( !( trace->contents & CONTENTS_TRANSLUCENT ) ) {
-		return false;
-	}
-
-	vec3_t rayDir;
-	VectorSubtract( to, from, rayDir );
-	VectorNormalize( rayDir );
-
-	// Do 8 attempts to continue tracing.
-	// It might seem that the threshold could be lower,
-	// but keep in mind situations like on wca1
-	// while looking behind a glass tube being behind a glass wall itself.
-	for( int i = 0; i < 8; ++i ) {
-		vec3_t rayStart;
-		VectorMA( trace->endpos, 2.0f, rayDir, rayStart );
-
-		CM_TransformedBoxTrace( cms, trace, rayStart, (float *)to, vec3_origin, vec3_origin, NULL, MASK_SOLID, NULL, NULL );
-
-		if( trace->fraction == 1.0f ) {
-			return true;
-		}
-
-		if( !( trace->contents & CONTENTS_TRANSLUCENT ) ) {
-			return false;
-		}
-	}
-
-	return false;
-}
-
-static inline void SNAP_GetRandomPointInBox( const vec3_t origin, const vec3_t mins, const vec3_t size, vec3_t result ) {
-	result[0] = origin[0] + mins[0] + random() * size[0];
-	result[1] = origin[1] + mins[1] + random() * size[1];
-	result[2] = origin[2] + mins[2] + random() * size[2];
-}
-
-static struct {
-	int64_t timestamp : 63;
-	bool result: 1;
-} clientsRaycastResultsTable[MAX_CLIENTS - 1][MAX_CLIENTS - 1];
-
-static bool SNAP_TryCullClientByRaycasting( cmodel_state_t *cms, edict_t *clent, const vec3_t vieworg, edict_t *ent );
-
-static bool SNAP_TryCullEntityByRaycasting( cmodel_state_t *cms, edict_t *clent,
-											const vec3_t vieworg, edict_t *ent,
-											client_snapshot_t *frame ) {
-	const gclient_t *entClient = ent->r.client;
-	if( !entClient ) {
-		return false;
-	}
-
-	const gclient_t *client = clent->r.client;
-
-	vec3_t clientViewOrigin;
-	VectorCopy( clent->s.origin, clientViewOrigin );
-	clientViewOrigin[2] += client->ps.viewheight;
-
-	// Should be an actual origin
-	if( !VectorCompare( clientViewOrigin, vieworg ) ) {
-		return false;
-	}
-
-	// After all these checks we can consider the client-to-entity visibility relation symmetrical
-
-	int clientPlayerNum = clent->s.number - 1;
-	int entPlayerNum = ent->s.number - 1;
-	if( clientsRaycastResultsTable[clientPlayerNum][entPlayerNum].timestamp == frame->sentTimeStamp ) {
-		return clientsRaycastResultsTable[clientPlayerNum][entPlayerNum].result;
-	}
-
-	bool result = SNAP_TryCullClientByRaycasting( cms, clent, vieworg, ent );
-
-	clientsRaycastResultsTable[clientPlayerNum][entPlayerNum].timestamp = frame->sentTimeStamp;
-	clientsRaycastResultsTable[clientPlayerNum][entPlayerNum].result = result;
-	clientsRaycastResultsTable[entPlayerNum][clientPlayerNum].timestamp = frame->sentTimeStamp;
-	clientsRaycastResultsTable[entPlayerNum][clientPlayerNum].result = result;
-	return result;
-}
-
-static bool SNAP_TryCullClientByRaycasting( cmodel_state_t *cms, edict_t *clent, const vec3_t vieworg, edict_t *ent ) {
-	const gclient_t *const client = clent->r.client;
-	const gclient_t *const entClient = ent->r.client;
-
-	// Do not use vis culling for fast moving clients/entities due to being prone to glitches
-
-	const float *clientVelocity = client->ps.pmove.velocity;
-	float squareClientVelocity = VectorLengthSquared( clientVelocity );
-	if( squareClientVelocity > 1100 * 1100 ) {
-		return false;
-	}
-
-	const float *entityVelocity = ent->r.client->ps.pmove.velocity;
-	float squareEntityVelocity = VectorLengthSquared( entityVelocity );
-	if( squareEntityVelocity > 1100 * 1100 ) {
-		return false;
-	}
-
-	if( squareClientVelocity > 800 * 800 && squareEntityVelocity > 800 * 800 ) {
-		return false;
-	}
-
-	vec3_t to;
-	VectorCopy( ent->s.origin, to );
-
-	trace_t trace;
-	// Do a first raycast to the entity origin for a fast cutoff
-	if( SNAP_Raycast( cms, &trace, vieworg, to ) ) {
-		return false;
-	}
-
-	// Do a second raycast at the entity chest/eyes level
-	to[2] += entClient->ps.viewheight;
-	if( SNAP_Raycast( cms, &trace, vieworg, to ) ) {
-		return false;
-	}
-
-	// Test a random point in entity bounds now
-	SNAP_GetRandomPointInBox( ent->s.origin, ent->r.mins, ent->r.size, to );
-	if( SNAP_Raycast( cms, &trace, vieworg, to ) ) {
-		return false;
-	}
-
-	// Test all bbox corners at the current position.
-	// Prevent missing a player that should be clearly visible.
-
-	vec3_t bounds[2];
-	// Shrink bounds by 2 units to avoid ending in a solid if the entity contacts some brushes.
-	for( int i = 0; i < 3; ++i ) {
-		bounds[0][i] = ent->r.mins[i] + 2.0f;
-		bounds[1][i] = ent->r.maxs[i] - 2.0f;
-	}
-
-	for( int i = 0; i < 8; ++i ) {
-		to[0] = ent->s.origin[0] + bounds[(i >> 2) & 1][0];
-		to[1] = ent->s.origin[1] + bounds[(i >> 1) & 1][1];
-		to[2] = ent->s.origin[2] + bounds[(i >> 0) & 1][2];
-		if( SNAP_Raycast( cms, &trace, vieworg, to ) ) {
-			return false;
-		}
-	}
-
-	// There is no need to extrapolate
-	if( squareClientVelocity < 10 * 10 && squareEntityVelocity < 10 * 10 ) {
-		return true;
-	}
-
-	// We might think about skipping culling for high-ping players but pings are easily mocked from a client side.
-	// The game is barely playable for really high pings anyway.
-
-	float xerpTimeSeconds = 0.001f * ( 100 + client->r.ping );
-	clamp_high( xerpTimeSeconds, 0.275f );
-
-	// We want to test the trajectory in "continuous" way.
-	// Use a fixed small trajectory step and adjust the timestep using it.
-	float timestep;
-	if( squareEntityVelocity > squareClientVelocity ) {
-		timestep = 24.0f / sqrtf( squareEntityVelocity );
-	} else {
-		timestep = 24.0f / sqrtf( squareClientVelocity );
-	}
-
-	float secondsAhead = 0.0f;
-	while( secondsAhead < xerpTimeSeconds ) {
-		secondsAhead += timestep;
-
-		vec3_t from;
-		vec3_t entOrigin;
-
-		VectorMA( vieworg, secondsAhead, clientVelocity, from );
-		VectorMA( ent->s.origin, secondsAhead, vec3_origin, entOrigin );
-
-		SNAP_GetRandomPointInBox( entOrigin, ent->r.mins, ent->r.size, to );
-		if( SNAP_Raycast( cms, &trace, from, to ) ) {
-			return false;
-		}
-	}
-
-	return true;
-}
-
 //=====================================================================
 
 #define MAX_SNAPSHOT_ENTITIES   1024
@@ -950,8 +749,8 @@ static bool SNAP_SnapCullEntity( cmodel_state_t *cms, edict_t *ent,
 				if( shadow_real_events_data ) {
 					// If the entity would have been culled if there were no events
 					if( !( ent->r.svflags & SVF_TRANSMITORIGIN2 ) ) {
-						if( SNAP_TryCullEntityByRaycasting( cms, clent, vieworg, ent, frame ) ) {
-							SNAP_Shadow( frame, ent->s.number );
+						if( SnapVisTable::Instance()->TryCullingByCastingRays( clent, vieworg, ent ) ) {
+							SnapShadowTable::Instance()->MarkEntityAsShadowed( frame->ps->playerNum, ent->s.number );
 						}
 					}
 				}
@@ -964,7 +763,7 @@ static bool SNAP_SnapCullEntity( cmodel_state_t *cms, edict_t *ent,
 			return false;
 		}
 
-		if( use_raycasting && SNAP_TryCullEntityByRaycasting( cms, clent, vieworg, ent, frame ) ) {
+		if( use_raycasting && SnapVisTable::Instance()->TryCullingByCastingRays( clent, vieworg, ent ) ) {
 			return true;
 		}
 
@@ -993,8 +792,8 @@ static bool SNAP_SnapCullEntity( cmodel_state_t *cms, edict_t *ent,
 		if( shadow_real_events_data ) {
 			// If the entity would have been culled if there were no events
 			if( !( ent->r.svflags & SVF_TRANSMITORIGIN2 ) ) {
-				if( SNAP_TryCullEntityByRaycasting( cms, clent, vieworg, ent, frame ) ) {
-					SNAP_Shadow( frame, ent->s.number );
+				if( SnapVisTable::Instance()->TryCullingByCastingRays( clent, vieworg, ent ) ) {
+					SnapShadowTable::Instance()->MarkEntityAsShadowed( frame->ps->playerNum, ent->s.number );
 				}
 			}
 		}
@@ -1010,7 +809,7 @@ static bool SNAP_SnapCullEntity( cmodel_state_t *cms, edict_t *ent,
 		return false;
 	}
 
-	if( use_raycasting && SNAP_TryCullEntityByRaycasting( cms, clent, vieworg, ent, frame ) ) {
+	if( use_raycasting && SnapVisTable::Instance()->TryCullingByCastingRays( clent, vieworg, ent ) ) {
 		return true;
 	}
 

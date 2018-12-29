@@ -40,6 +40,7 @@ file(GLOB SERVER_SOURCES
     "../qcommon/svnrev.cpp"
     "../qcommon/snap_demos.cpp"
     "../qcommon/snap_write.cpp"
+	"../qcommon/snap_tables.cpp"
     "../qcommon/ascript.cpp"
     "../qcommon/anticheat.cpp"
     "../qcommon/wswcurl.cpp"
