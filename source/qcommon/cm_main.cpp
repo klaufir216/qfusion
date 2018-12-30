@@ -388,7 +388,7 @@ cmodel_t *CM_InlineModel( cmodel_state_t *cms, int num ) {
 /*
 * CM_NumInlineModels
 */
-int CM_NumInlineModels( cmodel_state_t *cms ) {
+int CM_NumInlineModels( const cmodel_state_t *cms ) {
 	return cms->numcmodels;
 }
 
@@ -418,7 +418,7 @@ const char *CM_ShaderrefName( cmodel_state_t *cms, int ref ) {
 /*
 * CM_EntityStringLen
 */
-int CM_EntityStringLen( cmodel_state_t *cms ) {
+int CM_EntityStringLen( const cmodel_state_t *cms ) {
 	return cms->numentitychars;
 }
 
@@ -432,7 +432,7 @@ char *CM_EntityString( cmodel_state_t *cms ) {
 /*
 * CM_LeafCluster
 */
-int CM_LeafCluster( cmodel_state_t *cms, int leafnum ) {
+int CM_LeafCluster( const cmodel_state_t *cms, int leafnum ) {
 	if( leafnum < 0 || leafnum >= cms->numleafs ) {
 		Com_Error( ERR_DROP, "CM_LeafCluster: bad number" );
 	}
@@ -442,7 +442,7 @@ int CM_LeafCluster( cmodel_state_t *cms, int leafnum ) {
 /*
 * CM_LeafArea
 */
-int CM_LeafArea( cmodel_state_t *cms, int leafnum ) {
+int CM_LeafArea( const cmodel_state_t *cms, int leafnum ) {
 	if( leafnum < 0 || leafnum >= cms->numleafs ) {
 		Com_Error( ERR_DROP, "CM_LeafArea: bad number" );
 	}
@@ -493,7 +493,7 @@ uint8_t *CM_DecompressVis( const uint8_t *in, int rowsize, uint8_t *decompressed
 /*
 * CM_ClusterRowSize
 */
-int CM_ClusterRowSize( cmodel_state_t *cms ) {
+int CM_ClusterRowSize( const cmodel_state_t *cms ) {
 	return cms->map_pvs ? cms->map_pvs->rowsize : MAX_CM_LEAFS / 8;
 }
 
@@ -507,15 +507,15 @@ static int CM_ClusterRowLongs( cmodel_state_t *cms ) {
 /*
 * CM_NumClusters
 */
-int CM_NumClusters( cmodel_state_t *cms ) {
+int CM_NumClusters( const cmodel_state_t *cms ) {
 	return cms->map_pvs ? cms->map_pvs->numclusters : 0;
 }
 
 /*
 * CM_ClusterPVS
 */
-static inline uint8_t *CM_ClusterPVS( cmodel_state_t *cms, int cluster ) {
-	dvis_t *vis = cms->map_pvs;
+static inline const uint8_t *CM_ClusterPVS( const cmodel_state_t *cms, int cluster ) {
+	const dvis_t *vis = cms->map_pvs;
 
 	if( cluster == -1 || !vis ) {
 		return cms->nullrow;
@@ -527,14 +527,14 @@ static inline uint8_t *CM_ClusterPVS( cmodel_state_t *cms, int cluster ) {
 /*
 * CM_NumAreas
 */
-int CM_NumAreas( cmodel_state_t *cms ) {
+int CM_NumAreas( const cmodel_state_t *cms ) {
 	return cms->numareas;
 }
 
 /*
 * CM_AreaRowSize
 */
-int CM_AreaRowSize( cmodel_state_t *cms ) {
+int CM_AreaRowSize( const cmodel_state_t *cms ) {
 	return ( cms->numareas + 7 ) / 8;
 }
 
@@ -624,7 +624,7 @@ void CM_SetAreaPortalState( cmodel_state_t *cms, int area1, int area2, bool open
 /*
 * CM_AreasConnected
 */
-bool CM_AreasConnected( cmodel_state_t *cms, int area1, int area2 ) {
+bool CM_AreasConnected( const cmodel_state_t *cms, int area1, int area2 ) {
 	if( cm_noAreas->integer ) {
 		return true;
 	}
@@ -652,7 +652,7 @@ bool CM_AreasConnected( cmodel_state_t *cms, int area1, int area2 ) {
 /*
 * CM_MergeAreaBits
 */
-static int CM_MergeAreaBits( cmodel_state_t *cms, uint8_t *buffer, int area ) {
+static int CM_MergeAreaBits( const cmodel_state_t *cms, uint8_t *buffer, int area ) {
 	int i;
 
 	if( area < 0 ) {
@@ -671,7 +671,7 @@ static int CM_MergeAreaBits( cmodel_state_t *cms, uint8_t *buffer, int area ) {
 /*
 * CM_WriteAreaBits
 */
-int CM_WriteAreaBits( cmodel_state_t *cms, uint8_t *buffer ) {
+int CM_WriteAreaBits( const cmodel_state_t *cms, uint8_t *buffer ) {
 	int i;
 	int rowsize, bytes;
 
@@ -755,9 +755,9 @@ void CM_ReadPortalState( cmodel_state_t *cms, int file ) {
 * Returns true if any leaf under headnode has a cluster that
 * is potentially visible
 */
-bool CM_HeadnodeVisible( cmodel_state_t *cms, int nodenum, uint8_t *visbits ) {
+bool CM_HeadnodeVisible( const cmodel_state_t *cms, int nodenum, const uint8_t *visbits ) {
 	int cluster;
-	cnode_t *node;
+	const cnode_t *node;
 
 	while( nodenum >= 0 ) {
 		node = &cms->map_nodes[nodenum];
@@ -786,7 +786,7 @@ void CM_MergePVS( cmodel_state_t *cms, const vec3_t org, uint8_t *out ) {
 	int leafs[128];
 	int i, j, count;
 	int longs;
-	uint8_t *src;
+	const uint8_t *src;
 	vec3_t mins, maxs;
 
 	for( i = 0; i < 3; i++ ) {
@@ -846,19 +846,19 @@ int CM_MergeVisSets( cmodel_state_t *cms, const vec3_t org, uint8_t *pvs, uint8_
 *
 * Also checks portalareas so that doors block sight
 */
-bool CM_InPVS( cmodel_state_t *cms, const vec3_t p1, const vec3_t p2 ) {
+bool CM_InPVS( const cmodel_state_t *cms, const vec3_t p1, const vec3_t p2 ) {
 	int leafnum1, leafnum2;
 
-	leafnum1 = CM_PointLeafnum( cms, p1 );
-	leafnum2 = CM_PointLeafnum( cms, p2 );
+	leafnum1 = CM_PointLeafnum( cms, p1, 0 );
+	leafnum2 = CM_PointLeafnum( cms, p2, 0 );
 
 	return CM_LeafsInPVS( cms, leafnum1, leafnum2 );
 }
 
-bool CM_LeafsInPVS( cmodel_state_t *cms, int leafnum1, int leafnum2 ) {
+bool CM_LeafsInPVS( const cmodel_state_t *cms, int leafnum1, int leafnum2 ) {
 	int cluster;
 	int area1, area2;
-	uint8_t *mask;
+	const uint8_t *mask;
 
 	cluster = CM_LeafCluster( cms, leafnum1 );
 	area1 = CM_LeafArea( cms, leafnum1 );

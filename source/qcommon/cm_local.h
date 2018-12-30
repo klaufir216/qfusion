@@ -207,10 +207,10 @@ struct cmodel_state_s {
 	cbrush_t *oct_markbrushes[1];
 	cmodel_t oct_cmodel[1];
 
-	int leaf_count, leaf_maxcount;
-	int *leaf_list;
-	float *leaf_mins, *leaf_maxs;
-	int leaf_topnode;
+	mutable int leaf_count, leaf_maxcount;
+	mutable int *leaf_list;
+	mutable const float *leaf_mins, *leaf_maxs;
+	mutable int leaf_topnode;
 
 	struct CMTraceComputer *traceComputer;
 };

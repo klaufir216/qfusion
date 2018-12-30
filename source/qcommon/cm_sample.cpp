@@ -4,8 +4,10 @@
 /*
 * CM_PointLeafnum
 */
-int CM_PointLeafnum( cmodel_state_t *cms, const vec3_t p ) {
-	int num = 0;
+int CM_PointLeafnum( const cmodel_state_t *cms, const vec3_t p, int topNodeHint ) {
+	assert( topNodeHint >= 0 );
+
+	int num = topNodeHint;
 	cnode_t *node;
 
 	if( !cms->numplanes ) {
@@ -25,7 +27,7 @@ int CM_PointLeafnum( cmodel_state_t *cms, const vec3_t p ) {
 *
 * Fills in a list of all the leafs touched
 */
-static void CM_BoxLeafnums_r( cmodel_state_t *cms, int nodenum ) {
+static void CM_BoxLeafnums_r( const cmodel_state_t *cms, int nodenum ) {
 	int s;
 	cnode_t *node;
 
@@ -54,7 +56,12 @@ static void CM_BoxLeafnums_r( cmodel_state_t *cms, int nodenum ) {
 /*
 * CM_BoxLeafnums
 */
-int CM_BoxLeafnums( cmodel_state_t *cms, vec3_t mins, vec3_t maxs, int *list, int listsize, int *topnode ) {
+int CM_BoxLeafnums( const cmodel_state_t *cms,
+					const vec3_t mins, const vec3_t maxs,
+					int *list, int listsize,
+					int *topnode, int topNodeHint ) {
+	assert( topNodeHint >= 0 );
+
 	cms->leaf_list = list;
 	cms->leaf_count = 0;
 	cms->leaf_maxcount = listsize;
@@ -63,7 +70,10 @@ int CM_BoxLeafnums( cmodel_state_t *cms, vec3_t mins, vec3_t maxs, int *list, in
 
 	cms->leaf_topnode = -1;
 
-	CM_BoxLeafnums_r( cms, 0 );
+	CM_BoxLeafnums_r( cms, topNodeHint );
+
+	// Make sure the hinted top node is a parent of found split node
+	assert( !topNodeHint || cms->leaf_topnode > topNodeHint );
 
 	if( topnode ) {
 		*topnode = cms->leaf_topnode;
@@ -75,7 +85,7 @@ int CM_BoxLeafnums( cmodel_state_t *cms, vec3_t mins, vec3_t maxs, int *list, in
 /*
 * CM_BrushContents
 */
-static inline int CM_BrushContents( cbrush_t *brush, vec3_t p ) {
+static inline int CM_BrushContents( const cbrush_t *brush, const vec3_t p ) {
 	int i;
 	cbrushside_t *brushside;
 
@@ -90,9 +100,9 @@ static inline int CM_BrushContents( cbrush_t *brush, vec3_t p ) {
 /*
 * CM_PatchContents
 */
-static inline int CM_PatchContents( cface_t *patch, vec3_t p ) {
+static inline int CM_PatchContents( const cface_t *patch, const vec3_t p ) {
 	int i, c;
-	cbrush_t *facet;
+	const cbrush_t *facet;
 
 	for( i = 0, facet = patch->facets; i < patch->numfacets; i++, facet++ )
 		if( ( c = CM_BrushContents( facet, p ) ) ) {
@@ -105,7 +115,9 @@ static inline int CM_PatchContents( cface_t *patch, vec3_t p ) {
 /*
 * CM_PointContents
 */
-static int CM_PointContents( cmodel_state_t *cms, vec3_t p, cmodel_t *cmodel ) {
+static int CM_PointContents( const cmodel_state_t *cms, const vec3_t p, const cmodel_t *cmodel, int topNodeHint ) {
+	assert( topNodeHint >= 0 );
+
 	int i, superContents, contents;
 	int nummarkfaces, nummarkbrushes;
 	cface_t *patch, *markface;
@@ -118,7 +130,7 @@ static int CM_PointContents( cmodel_state_t *cms, vec3_t p, cmodel_t *cmodel ) {
 	if( cmodel == cms->map_cmodels ) {
 		cleaf_t *leaf;
 
-		leaf = &cms->map_leafs[CM_PointLeafnum( cms, p )];
+		leaf = &cms->map_leafs[CM_PointLeafnum( cms, p, topNodeHint )];
 		superContents = leaf->contents;
 
 		markbrush = leaf->brushes;
@@ -171,7 +183,8 @@ static int CM_PointContents( cmodel_state_t *cms, vec3_t p, cmodel_t *cmodel ) {
 * Handles offseting and rotation of the end points for moving and
 * rotating entities
 */
-int CM_TransformedPointContents( cmodel_state_t *cms, vec3_t p, cmodel_t *cmodel, vec3_t origin, vec3_t angles ) {
+int CM_TransformedPointContents( const cmodel_state_t *cms, const vec3_t p, const cmodel_t *cmodel,
+								 const vec3_t origin, const vec3_t angles, int topNodeHint ) {
 	vec3_t p_l;
 
 	if( !cms->numnodes ) { // map not loaded
@@ -204,5 +217,33 @@ int CM_TransformedPointContents( cmodel_state_t *cms, vec3_t p, cmodel_t *cmodel
 		Matrix3_TransformVector( axis, temp, p_l );
 	}
 
-	return CM_PointContents( cms, p_l, cmodel );
+	return CM_PointContents( cms, p_l, cmodel, topNodeHint );
+}
+
+int CM_FindTopNodeForBox( const cmodel_state_t *cms, const vec3_t mins, const vec3_t maxs, unsigned maxValue ) {
+	// Spread bounds a bit to ensure inclusion of boundary planes in an enclosing node
+	vec3_t testedMins { -2, -2, -2 };
+	vec3_t testedMaxs { +2, +2, +2 };
+	VectorAdd( mins, testedMins, testedMins );
+	VectorAdd( maxs, testedMaxs, testedMaxs );
+
+	int lastGoodNode = 0;
+	for(;; ) {
+		const cnode_t *node = &cms->map_nodes[lastGoodNode];
+		int side = BOX_ON_PLANE_SIDE( testedMins, testedMaxs, node->plane );
+		// Stop at finding a splitting node
+		if( side == 3 ) {
+			return lastGoodNode;
+		}
+		int child = node->children[side - 1];
+		// Stop at leaves
+		if( child < 0 ) {
+			return lastGoodNode;
+		}
+		// Stop at maximum allowed numeric value of a child
+		if( (unsigned)child > maxValue ) {
+			return lastGoodNode;
+		}
+		lastGoodNode = child;
+	}
 }

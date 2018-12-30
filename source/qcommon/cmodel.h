@@ -20,15 +20,18 @@
 
 typedef struct cmodel_state_s cmodel_state_t;
 
+// Hack! Prevent inclusion of this C++ prototypes (that are convenient) in C code (that is still present somewhere)
+#ifdef __cplusplus
+
 struct cmodel_s *CM_LoadMap( cmodel_state_t *cms, const char *name, bool clientload, unsigned *checksum );
 struct cmodel_s *CM_InlineModel( cmodel_state_t *cms, int num ); // 1, 2, etc
 char *CM_LoadMapMessage( char *name, char *message, int size );
 
-int CM_NumClusters( cmodel_state_t *cms );
-int CM_NumAreas( cmodel_state_t *cms );
-int CM_NumInlineModels( cmodel_state_t *cms );
+int CM_NumClusters( const cmodel_state_t *cms );
+int CM_NumAreas( const cmodel_state_t *cms );
+int CM_NumInlineModels( const cmodel_state_t *cms );
 char *CM_EntityString( cmodel_state_t *cms );
-int CM_EntityStringLen( cmodel_state_t *cms );
+int CM_EntityStringLen( const cmodel_state_t *cms );
 const char *CM_ShaderrefName( cmodel_state_t *cms, int ref );
 
 // creates a clipping hull for an arbitrary bounding box
@@ -37,29 +40,56 @@ struct cmodel_s *CM_OctagonModelForBBox( cmodel_state_t *cms, vec3_t mins, vec3_
 
 void CM_InlineModelBounds( cmodel_state_t *cms, struct cmodel_s *cmodel, vec3_t mins, vec3_t maxs );
 
+/**
+ * Given a box defined by bounds finds a best enclosing it BSP node.
+ * (all box corners must belong to the node).
+ * @param cms a collision model instance
+ * @param mins the box mins
+ * @param maxs the box maxs
+ * @param maxValue the maximum numeric value of a node
+ * (useful if a caller wants to store nodes in a compact form using few bits).
+ * @return a number of the best enclosing top node.
+ * @note the result is never negative (leaves handling at caller-side is error-prone).
+ * @note this is not that cheap to call.
+ * This call is most suitable for precomputing top nodes of boxes.
+ * That's what {@code maxValue} parameter is for.
+ * Aside from that this call is useful for getting a top node of a given bounds
+ * and then performing collision calls that operate fully withing the bounds and accept the top node hint.
+ */
+int CM_FindTopNodeForBox( const cmodel_state_t *cms, const vec3_t mins, const vec3_t maxs, unsigned maxValue = ~( 0u ) );
+
 // returns an ORed contents mask
-int CM_TransformedPointContents( cmodel_state_t *cms, vec3_t p, struct cmodel_s *cmodel, vec3_t origin, vec3_t angles );
+int CM_TransformedPointContents( const cmodel_state_t *cms, const vec3_t p,
+								 const struct cmodel_s *cmodel, const vec3_t origin,
+								 const vec3_t angles, int topNodeHint = 0 );
 
-void CM_TransformedBoxTrace( cmodel_state_t *cms, trace_t *tr, vec3_t start, vec3_t end, vec3_t mins, vec3_t maxs,
-							 struct cmodel_s *cmodel, int brushmask, vec3_t origin, vec3_t angles );
+void CM_TransformedBoxTrace( const cmodel_state_t *cms, trace_t *tr,
+							 const vec3_t start, const vec3_t end,
+							 const vec3_t mins, const vec3_t maxs,
+							 const struct cmodel_s *cmodel, int brushmask,
+							 const vec3_t origin, const vec3_t angles,
+							 int topNodeHint = 0 );
 
-int CM_ClusterRowSize( cmodel_state_t *cms );
-int CM_AreaRowSize( cmodel_state_t *cms );
-int CM_PointLeafnum( cmodel_state_t *cms, const vec3_t p );
+int CM_ClusterRowSize( const cmodel_state_t *cms );
+int CM_AreaRowSize( const cmodel_state_t *cms );
+int CM_PointLeafnum( const cmodel_state_t *cms, const vec3_t p, int topNodeHint = 0 );
 
 // call with topnode set to the headnode, returns with topnode
 // set to the first node that splits the box
-int CM_BoxLeafnums( cmodel_state_t *cms, vec3_t mins, vec3_t maxs, int *list, int listsize, int *topnode );
+int CM_BoxLeafnums( const cmodel_state_t *cms,
+					const vec3_t mins, const vec3_t maxs,
+					int *list, int listsize,
+					int *topnode, int topNodeHint = 0 );
 
-int CM_LeafCluster( cmodel_state_t *cms, int leafnum );
-int CM_LeafArea( cmodel_state_t *cms, int leafnum );
+int CM_LeafCluster( const cmodel_state_t *cms, int leafnum );
+int CM_LeafArea( const cmodel_state_t *cms, int leafnum );
 
 void CM_SetAreaPortalState( cmodel_state_t *cms, int area1, int area2, bool open );
-bool CM_AreasConnected( cmodel_state_t *cms, int area1, int area2 );
+bool CM_AreasConnected( const cmodel_state_t *cms, int area1, int area2 );
 
-int CM_WriteAreaBits( cmodel_state_t *cms, uint8_t *buffer );
+int CM_WriteAreaBits( const cmodel_state_t *cms, uint8_t *buffer );
 void CM_ReadAreaBits( cmodel_state_t *cms, uint8_t *buffer );
-bool CM_HeadnodeVisible( cmodel_state_t *cms, int headnode, uint8_t *visbits );
+bool CM_HeadnodeVisible( const cmodel_state_t *cms, int headnode, const uint8_t *visbits );
 
 void CM_WritePortalState( cmodel_state_t *cms, int file );
 void CM_ReadPortalState( cmodel_state_t *cms, int file );
@@ -68,9 +98,9 @@ void CM_MergePVS( cmodel_state_t *cms, const vec3_t org, uint8_t *out );
 void CM_MergePHS( cmodel_state_t *cms, int cluster, uint8_t *out );
 int CM_MergeVisSets( cmodel_state_t *cms, const vec3_t org, uint8_t *pvs, uint8_t *areabits );
 
-bool CM_InPVS( cmodel_state_t *cms, const vec3_t p1, const vec3_t p2 );
+bool CM_InPVS( const cmodel_state_t *cms, const vec3_t p1, const vec3_t p2 );
 
-bool CM_LeafsInPVS( cmodel_state_t *cms, int leafnum1, int leafnum2 );
+bool CM_LeafsInPVS( const cmodel_state_t *cms, int leafnum1, int leafnum2 );
 
 int CM_NumLeafs( const cmodel_state_t *cms );
 const vec3_t *CM_GetLeafBounds( const cmodel_state_t *cms, int leafNum );
@@ -84,3 +114,5 @@ void CM_ReleaseReference( cmodel_state_t *cms );
 //
 void CM_Init( void );
 void CM_Shutdown( void );
+
+#endif

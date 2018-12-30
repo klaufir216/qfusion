@@ -600,7 +600,9 @@ void CMTraceComputer::ClipBoxToLeaf( CMTraceContext *tlc, cbrush_t *brushes,
 	}
 }
 
-void CMTraceComputer::RecursiveHullCheck( CMTraceContext *tlc, int num, float p1f, float p2f, vec3_t p1, vec3_t p2 ) {
+void CMTraceComputer::RecursiveHullCheck( CMTraceContext *tlc, int num,
+										  float p1f, float p2f,
+										  const vec3_t p1, const vec3_t p2 ) {
 	cnode_t *node;
 	cplane_t *plane;
 	int side;
@@ -718,11 +720,10 @@ void CMTraceComputer::SetupCollideContext( CMTraceContext *tlc, trace_t *tr, con
 	AddPointToBounds( tlc->endmaxs, tlc->absmins, tlc->absmaxs );
 }
 
-
-
 void CMTraceComputer::Trace( trace_t *tr, const vec3_t start, const vec3_t end,
-							 const vec3_t mins, const vec3_t maxs, cmodel_t *cmodel, int brushmask ) {
-	ATTRIBUTE_ALIGNED( 16 ) CMTraceContext tlc;
+							 const vec3_t mins, const vec3_t maxs,
+							 const cmodel_t *cmodel, int brushmask, int topNodeHint ) {
+	assert( topNodeHint >= 0 );
 
 	// fill in a default trace
 	memset( tr, 0, sizeof( *tr ) );
@@ -731,6 +732,7 @@ void CMTraceComputer::Trace( trace_t *tr, const vec3_t start, const vec3_t end,
 		return;
 	}
 
+	alignas( 16 ) CMTraceContext tlc;
 	SetupCollideContext( &tlc, tr, start, end, mins, maxs, brushmask );
 
 	//
@@ -751,7 +753,7 @@ void CMTraceComputer::Trace( trace_t *tr, const vec3_t start, const vec3_t end,
 
 			int leafs[1024];
 			int topnode;
-			int numleafs = CM_BoxLeafnums( cms, boxmins, boxmaxs, leafs, 1024, &topnode );
+			int numleafs = CM_BoxLeafnums( cms, boxmins, boxmaxs, leafs, 1024, &topnode, topNodeHint );
 			for( int i = 0; i < numleafs; i++ ) {
 				cleaf_t *leaf = &cms->map_leafs[leafs[i]];
 					if( leaf->contents & tlc.contents ) {
@@ -797,7 +799,7 @@ void CMTraceComputer::Trace( trace_t *tr, const vec3_t start, const vec3_t end,
 	// general sweeping through world
 	//
 	if( cmodel == cms->map_cmodels ) {
-		RecursiveHullCheck( &tlc, 0, 0, 1, const_cast<float *>( start ), const_cast<float *>( end ) );
+		RecursiveHullCheck( &tlc, topNodeHint, 0, 1, start, end );
 	} else if( BoundsIntersect( cmodel->mins, cmodel->maxs, tlc.absmins, tlc.absmaxs ) ) {
 		auto func = &CMTraceComputer::ClipBoxToBrush;
 		CollideBox( &tlc, func, cmodel->brushes, cmodel->numbrushes, cmodel->faces, cmodel->numfaces );
@@ -821,9 +823,14 @@ void CMTraceComputer::Trace( trace_t *tr, const vec3_t start, const vec3_t end,
 * Handles offseting and rotation of the end points for moving and
 * rotating entities
 */
-void CM_TransformedBoxTrace( cmodel_state_t *cms, trace_t *tr, vec3_t start, vec3_t end,
-										vec3_t mins, vec3_t maxs, cmodel_t *cmodel,
-										int brushmask, vec3_t origin, vec3_t angles ) {
+void CM_TransformedBoxTrace( const cmodel_state_t *cms, trace_t *tr,
+							 const vec3_t start, const vec3_t end,
+							 const vec3_t mins, const vec3_t maxs,
+							 const cmodel_t *cmodel, int brushmask,
+							 const vec3_t origin, const vec3_t angles,
+							 int topNodeHint ) {
+	assert( topNodeHint >= 0 );
+
 	vec3_t start_l, end_l;
 	vec3_t a, temp;
 	mat3_t axis;
@@ -885,7 +892,7 @@ void CM_TransformedBoxTrace( cmodel_state_t *cms, trace_t *tr, vec3_t start, vec
 	}
 
 	// sweep the box through the model
-	cms->traceComputer->Trace( tr, start_l, end_l, mins, maxs, cmodel, brushmask );
+	cms->traceComputer->Trace( tr, start_l, end_l, mins, maxs, cmodel, brushmask, topNodeHint );
 
 	if( rotated && tr->fraction != 1.0 ) {
 		VectorNegate( angles, a );

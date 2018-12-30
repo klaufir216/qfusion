@@ -59,10 +59,10 @@ struct CMTraceComputer {
 	void TestBoxInBrush( CMTraceContext *tlc, cbrush_s *brush );
 	void ClipBoxToBrush( CMTraceContext *tlc, cbrush_s *brush );
 
-	void RecursiveHullCheck( CMTraceContext *tlc, int num, float p1f, float p2f, vec3_t p1, vec3_t p2 );
+	void RecursiveHullCheck( CMTraceContext *tlc, int num, float p1f, float p2f, const vec3_t p1, const vec3_t p2 );
 
 	void Trace( trace_t *tr, const vec3_t start, const vec3_t end, const vec3_t mins,
-				const vec3_t maxs, cmodel_s *cmodel, int brushmask );
+				const vec3_t maxs, const cmodel_s *cmodel, int brushmask, int topNodeHint );
 };
 
 struct CMGenericTraceComputer final: public CMTraceComputer {};
