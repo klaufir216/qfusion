@@ -58,6 +58,19 @@ void CM_InlineModelBounds( cmodel_state_t *cms, struct cmodel_s *cmodel, vec3_t 
  */
 int CM_FindTopNodeForBox( const cmodel_state_t *cms, const vec3_t mins, const vec3_t maxs, unsigned maxValue = ~( 0u ) );
 
+/**
+ * Given a sphere finds a best enclosing it BSP node.
+ * @param cms a collision model instance
+ * @param center a sphere center
+ * @param radius a sphere radius
+ * @param maxValue the maximum numeric value of a node
+ * (useful if a caller wants to store nodes in a compact form using few bits).
+ * @return a number of the best enclosing top node
+ * @see CM_FindTopNodeForBox(cmodel_state_t *, const vec3_t, const vec3_t, unsigned).
+ * @note This call is cheaper to execute than {@code CM_FindTopNodeForBox()}
+ */
+int CM_FindTopNodeForSphere( const cmodel_state_t *cms, const vec3_t center, float radius, unsigned maxValue = ~( 0u ) );
+
 // returns an ORed contents mask
 int CM_TransformedPointContents( const cmodel_state_t *cms, const vec3_t p,
 								 const struct cmodel_s *cmodel, const vec3_t origin,

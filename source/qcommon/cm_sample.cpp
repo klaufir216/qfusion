@@ -1,6 +1,15 @@
 #include "qcommon.h"
 #include "cm_local.h"
 
+#ifdef max
+#undef max
+#endif
+#ifdef min
+#undef min
+#endif
+
+#include <limits>
+
 /*
 * CM_PointLeafnum
 */
@@ -241,6 +250,35 @@ int CM_FindTopNodeForBox( const cmodel_state_t *cms, const vec3_t mins, const ve
 			return lastGoodNode;
 		}
 		// Stop at maximum allowed numeric value of a child
+		if( (unsigned)child > maxValue ) {
+			return lastGoodNode;
+		}
+		lastGoodNode = child;
+	}
+}
+
+int CM_FindTopNodeForSphere( const cmodel_state_t *cms, const vec3_t center, float radius, unsigned maxValue ) {
+	// Spread radius a bit
+	const float testedRadius = radius + 2.0f;
+	const cnode_t *const __restrict nodes = cms->map_nodes;
+	const float *const __restrict c = center;
+
+	int lastGoodNode = 0;
+	for(;; ) {
+		const cnode_t *__restrict node = nodes + lastGoodNode;
+		const cplane_t *__restrict plane = node->plane;
+		float distanceToPlane = DotProduct( plane->normal, c ) - plane->dist;
+		int child;
+		if( distanceToPlane > +testedRadius ) {
+			child = node->children[0];
+		} else if( distanceToPlane < -testedRadius ) {
+			child = node->children[1];
+		} else {
+			return lastGoodNode;
+		}
+		if( child < 0 ) {
+			return lastGoodNode;
+		}
 		if( (unsigned)child > maxValue ) {
 			return lastGoodNode;
 		}
