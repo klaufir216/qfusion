@@ -112,11 +112,12 @@ void ObstructedEffectSampler::SetupDirectObstructionSamplingProps( src_t *src, u
 struct DirectObstructionOffsetsHolder {
 	enum { NUM_VALUES = 256 };
 	vec3_t offsets[NUM_VALUES];
+	enum { MAX_OFFSET = 20 };
 
 	DirectObstructionOffsetsHolder() {
 		for( auto *v: offsets ) {
 			for( int i = 0; i < 3; ++i ) {
-				v[i] = -20.0f + 40.0f * EffectSamplers::SamplingRandom();
+				v[i] = -MAX_OFFSET + 2 * MAX_OFFSET * EffectSamplers::SamplingRandom();
 			}
 		}
 	}
@@ -132,7 +133,7 @@ float ObstructedEffectSampler::ComputeDirectObstruction( const ListenerProps &li
 	vec3_t testedSourceOrigin;
 	float squareDistance;
 	unsigned numTestedRays, numPassedRays;
-	unsigned i, valueIndex;
+	unsigned valueIndex;
 
 	updateState = &src->envUpdateState;
 
@@ -150,7 +151,19 @@ float ObstructedEffectSampler::ComputeDirectObstruction( const ListenerProps &li
 		return 1.0f;
 	}
 
-	trap_Trace( &trace, testedListenerOrigin, src->origin, vec3_origin, vec3_origin, MASK_SOLID );
+	vec3_t hintBounds[2];
+	ClearBounds( hintBounds[0], hintBounds[1] );
+	AddPointToBounds( testedListenerOrigin, hintBounds[0], hintBounds[1] );
+	AddPointToBounds( src->origin, hintBounds[0], hintBounds[1] );
+	// Account for obstruction sampling offsets
+	// as we are going to compute the top node hint once
+	for( int i = 0; i < 3; ++i ) {
+		hintBounds[0][i] -= DirectObstructionOffsetsHolder::MAX_OFFSET;
+		hintBounds[1][i] += DirectObstructionOffsetsHolder::MAX_OFFSET;
+	}
+
+	const int topNodeHint = trap_FindTopNodeForBox( hintBounds[0], hintBounds[1] );
+	trap_Trace( &trace, testedListenerOrigin, src->origin, vec3_origin, vec3_origin, MASK_SOLID, topNodeHint );
 	if( trace.fraction == 1.0f && !trace.startsolid ) {
 		// Consider zero obstruction in this case
 		return 0.0f;
@@ -161,12 +174,12 @@ float ObstructedEffectSampler::ComputeDirectObstruction( const ListenerProps &li
 	numPassedRays = 0;
 	numTestedRays = updateState->directObstructionSamplingProps.numSamples;
 	valueIndex = updateState->directObstructionSamplingProps.valueIndex;
-	for( i = 0; i < numTestedRays; i++ ) {
+	for( unsigned i = 0; i < numTestedRays; i++ ) {
 		valueIndex = ( valueIndex + 1 ) % DirectObstructionOffsetsHolder::NUM_VALUES;
 		originOffset = directObstructionOffsetsHolder.offsets[ valueIndex ];
 
 		VectorAdd( src->origin, originOffset, testedSourceOrigin );
-		trap_Trace( &trace, testedListenerOrigin, testedSourceOrigin, vec3_origin, vec3_origin, MASK_SOLID );
+		trap_Trace( &trace, testedListenerOrigin, testedSourceOrigin, vec3_origin, vec3_origin, MASK_SOLID, topNodeHint );
 		if( trace.fraction == 1.0f && !trace.startsolid ) {
 			numPassedRays++;
 		}

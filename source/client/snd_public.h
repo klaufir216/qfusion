@@ -20,7 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // snd_public.h -- sound dll information visible to engine
 
-#define SOUND_API_VERSION   45
+#define SOUND_API_VERSION   46
 
 #define ATTN_NONE 0
 
@@ -94,13 +94,15 @@ typedef struct {
 	void ( *Mem_EmptyPool )( struct mempool_s *pool, const char *filename, int fileline );
 
 	// environment sampling
-	void ( *Trace )( struct trace_s *tr, vec3_t start, vec3_t end, vec3_t mins, vec3_t maxs, int mask );
-	int ( *PointContents )( vec3_t p );
+	void ( *Trace )( struct trace_s *tr, const vec3_t start, const vec3_t end, const vec3_t mins, const vec3_t maxs, int mask, int topNodeHint );
+	int ( *PointContents )( const vec3_t p, int topNodeHint );
 	// these calls serve utility of PVS sampling forcing efficient usage patterns
-	int ( *PointLeafNum )( const vec3_t p );
+	int ( *PointLeafNum )( const vec3_t p, int topNodeHint );
 	int ( *NumLeafs )();
 	const vec3_t *( *GetLeafBounds )( int leafnum );
 	bool ( *LeafsInPVS )( int leafnum1, int leafnum2 );
+	int ( *FindTopNodeForBox )( const vec3_t mins, const vec3_t maxs );
+	int ( *FindTopNodeForSphere )( const vec3_t center, float radius );
 
 	const char *( *GetConfigString )( int index );
 

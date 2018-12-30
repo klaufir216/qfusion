@@ -188,16 +188,17 @@ static inline void trap_UnloadLibrary( void **lib ) {
 	SOUND_IMPORT.Sys_UnloadLibrary( lib );
 }
 
-static inline void trap_Trace( struct trace_s *tr, vec3_t start, vec3_t end, vec3_t mins, vec3_t maxs, int mask ) {
-	SOUND_IMPORT.Trace( tr, start, end, mins, maxs, mask );
+static inline void trap_Trace( struct trace_s *tr, const vec3_t start, const vec3_t end, const vec3_t mins,
+							   const vec3_t maxs, int mask, int topNodeHint = 0 ) {
+	SOUND_IMPORT.Trace( tr, start, end, mins, maxs, mask, topNodeHint );
 }
 
-static inline int trap_PointContents( vec3_t p ) {
-	return SOUND_IMPORT.PointContents( p );
+static inline int trap_PointContents( const vec3_t p, int topNodeHint = 0 ) {
+	return SOUND_IMPORT.PointContents( p, topNodeHint );
 }
 
-static inline int trap_PointLeafNum( const vec3_t p ) {
-	return SOUND_IMPORT.PointLeafNum( p );
+static inline int trap_PointLeafNum( const vec3_t p, int topNodeHint = 0 ) {
+	return SOUND_IMPORT.PointLeafNum( p, topNodeHint );
 }
 
 static inline int trap_NumLeafs() {
@@ -215,6 +216,14 @@ static inline bool trap_LeafsInPVS( int leafnum1, int leafnum2 ) {
 		return true;
 	}
 	return SOUND_IMPORT.LeafsInPVS( leafnum1, leafnum2 );
+}
+
+static inline int trap_FindTopNodeForBox( const vec3_t mins, const vec3_t maxs ) {
+	return SOUND_IMPORT.FindTopNodeForBox( mins, maxs );
+}
+
+static inline int trap_FindTopNodeForSphere( const vec3_t center, float radius ) {
+	return SOUND_IMPORT.FindTopNodeForSphere( center, radius );
 }
 
 static inline const char *trap_GetConfigString( int index ) {

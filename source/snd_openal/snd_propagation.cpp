@@ -308,9 +308,10 @@ class LeafToLeafDirBuilder {
 	 * A picking might fail for degenerate leaves of some kind.
 	 * @param leafNum an actual leaf num in the collision world.
 	 * @param storageIndex an index of internal storage for first or second leaf (0 or 1)
+	 * @param topNodeHint a top node to start BSP traversal while testing point CM leaf num
 	 * @return false if a point picking has failed. A dir building should be interrupted in this case.
 	 */
-	bool PrepareTestedPointForLeaf( int leafNum, int storageIndex );
+	bool PrepareTestedPointForLeaf( int leafNum, int storageIndex, int topNodeHint );
 public:
 	explicit LeafToLeafDirBuilder( bool fastAndCoarse_, int numLeafs_ )
 		: maxAdditionalAttempts( fastAndCoarse_ ? ( numLeafs_ > 1000 ? 0 : 5 ) : 24 ) {
@@ -329,7 +330,7 @@ public:
 	float Build( int leaf1, int leaf2, vec3_t resultDir );
 };
 
-bool LeafToLeafDirBuilder::PrepareTestedPointForLeaf( int leafNum, int storageIndex ) {
+bool LeafToLeafDirBuilder::PrepareTestedPointForLeaf( int leafNum, int storageIndex, int topNodeHint ) {
 	float *const point = leafPoints[storageIndex];
 	const auto randomShift = (float)std::minstd_rand::min();
 	const auto randomScale = 1.0f / ( std::minstd_rand::max() - randomShift );
@@ -340,7 +341,7 @@ bool LeafToLeafDirBuilder::PrepareTestedPointForLeaf( int leafNum, int storageIn
 			float random01 = randomScale * ( randomnessEngine() - randomShift );
 			point[i] += -0.5f + random01 * leafDimensions[storageIndex][i];
 		}
-		if( trap_PointLeafNum( point ) == leafNum ) {
+		if( trap_PointLeafNum( point, topNodeHint ) == leafNum ) {
 			return true;
 		}
 	}
@@ -352,26 +353,32 @@ float LeafToLeafDirBuilder::Build( int leaf1, int leaf2, vec3_t resultDir ) {
 		return std::numeric_limits<float>::infinity();
 	}
 
-	const vec3_t *const bounds[2] = { trap_GetLeafBounds( leaf1 ), trap_GetLeafBounds( leaf2 ) };
-
+	vec3_t nodeHintBounds[2];
+	ClearBounds( nodeHintBounds[0], nodeHintBounds[1] );
+	const vec3_t *const leafBounds[2] = { trap_GetLeafBounds( leaf1 ), trap_GetLeafBounds( leaf2 ) };
 	for( int i = 0; i < 2; ++i ) {
 		// Get dimensions
-		VectorSubtract( bounds[i][1], bounds[i][0], leafCenters[i] );
+		VectorSubtract( leafBounds[i][1], leafBounds[i][0], leafCenters[i] );
 		VectorCopy( leafCenters[i], leafDimensions[i] );
 		// Get half-dimensions
 		VectorScale( leafCenters[i], 0.5f, leafCenters[i] );
 		// Add mins
-		VectorAdd( leafCenters[i], bounds[i][0], leafCenters[i] );
+		VectorAdd( leafCenters[i], leafBounds[i][0], leafCenters[i] );
+
+		// Build bounds for top node hint
+		AddPointToBounds( leafBounds[i][0], nodeHintBounds[0], nodeHintBounds[1] );
+		AddPointToBounds( leafBounds[i][1], nodeHintBounds[1], nodeHintBounds[1] );
 	}
 
 	// Prepare for adding dir contributions
 	VectorClear( resultDir );
 	bool hasContributingDirs = false;
 
+	const int topNodeHint = trap_FindTopNodeForBox( nodeHintBounds[0], nodeHintBounds[1] );
 	// Cast a ray from a leaf center to another leaf center.
 	// Do not test whether these centers really belong to a leaf
 	// (we remember this happening a lot for (almost) degenerate leaves while computing LeafPropsCache).
-	trap_Trace( &trace, leafCenters[0], leafCenters[1], vec3_origin, vec3_origin, MASK_SOLID );
+	trap_Trace( &trace, leafCenters[0], leafCenters[1], vec3_origin, vec3_origin, MASK_SOLID, topNodeHint );
 	if( trace.fraction == 1.0f ) {
 		// Add center-to-center dir contribution.
 		VectorSubtract( leafCenters[1], leafCenters[0], resultDir );
@@ -391,12 +398,12 @@ float LeafToLeafDirBuilder::Build( int leaf1, int leaf2, vec3_t resultDir ) {
 			// Stop doing attempts immediately on failure
 			// (we are very likely have met another kind of a degenerate leaf).
 			// TODO: We can try reusing picked leaf points from LeafPropsCache
-			if( !this->PrepareTestedPointForLeaf( leaves[j], j ) ) {
+			if( !this->PrepareTestedPointForLeaf( leaves[j], j, topNodeHint ) ) {
 				goto done;
 			}
 		}
 
-		trap_Trace( &trace, leafPoints[0], leafPoints[1], vec3_origin, vec3_origin, MASK_SOLID );
+		trap_Trace( &trace, leafPoints[0], leafPoints[1], vec3_origin, vec3_origin, MASK_SOLID, topNodeHint );
 		if( trace.fraction != 1.0f ) {
 			continue;
 		}

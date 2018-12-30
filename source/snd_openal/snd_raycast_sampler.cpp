@@ -49,6 +49,8 @@ void RayDirsHolder::ComputeDirs( unsigned numRays ) {
 
 void GenericRaycastSampler::EmitPrimaryRays() {
 	const float primaryEmissionRadius = GetEmissionRadius();
+	// Using top node hints is quite beneficial for small emission radii.
+	const int topNode = trap_FindTopNodeForSphere( emissionOrigin, primaryEmissionRadius );
 
 	// These values must be reset at this stage
 	assert( !averageDistance );
@@ -70,7 +72,7 @@ void GenericRaycastSampler::EmitPrimaryRays() {
 		vec3_t testedRayPoint;
 		VectorScale( sampleDir, primaryEmissionRadius, testedRayPoint );
 		VectorAdd( testedRayPoint, emissionOrigin, testedRayPoint );
-		trap_Trace( &trace, emissionOrigin, testedRayPoint, vec3_origin, vec3_origin, MASK_SOLID | MASK_WATER );
+		trap_Trace( &trace, emissionOrigin, testedRayPoint, vec3_origin, vec3_origin, MASK_SOLID | MASK_WATER, topNode );
 
 		if( trace.startsolid || trace.allsolid ) {
 			continue;

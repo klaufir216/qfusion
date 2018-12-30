@@ -174,9 +174,12 @@ static bool CL_SoundModule_Load( const char *name, sound_import_t *import, bool 
 	return true;
 }
 
-static void CL_SoundModule_Trace( trace_t *tr, vec3_t start, vec3_t end, vec3_t mins, vec3_t maxs, int mask ) {
+static void CL_SoundModule_Trace( trace_t *tr,
+								  const vec3_t start, const vec3_t end,
+								  const vec3_t mins, const vec3_t maxs,
+								  int mask, int topNodeHint ) {
 	if( cl.sound_cms ) {
-		CM_TransformedBoxTrace( cl.sound_cms, tr, start, end, mins, maxs, NULL, mask, NULL, NULL );
+		CM_TransformedBoxTrace( cl.sound_cms, tr, start, end, mins, maxs, NULL, mask, NULL, NULL, topNodeHint );
 		return;
 	}
 
@@ -185,16 +188,16 @@ static void CL_SoundModule_Trace( trace_t *tr, vec3_t start, vec3_t end, vec3_t 
 	tr->allsolid = false;
 }
 
-static int CL_SoundModule_PointContents( vec3_t p ) {
+static int CL_SoundModule_PointContents( const vec3_t p, int topNodeHint ) {
 	if( cl.sound_cms ) {
-		return CM_TransformedPointContents( cl.sound_cms, p, NULL, NULL, NULL );
+		return CM_TransformedPointContents( cl.sound_cms, p, NULL, NULL, NULL, topNodeHint );
 	}
 	return 0;
 }
 
-static int CL_SoundModule_PointLeafNum( const vec3_t p ) {
+static int CL_SoundModule_PointLeafNum( const vec3_t p, int topNodeHint ) {
 	if( cl.sound_cms ) {
-		return CM_PointLeafnum( cl.sound_cms, p );
+		return CM_PointLeafnum( cl.sound_cms, p, topNodeHint );
 	}
 	return 0;
 }
@@ -218,6 +221,20 @@ static bool CL_SoundModule_LeafsInPVS( int leafnum1, int leafnum2 ) {
 		return CM_LeafsInPVS( cl.sound_cms, leafnum1, leafnum2 );
 	}
 	return true;
+}
+
+static int CL_SoundModule_FindTopNodeForBox( const vec3_t mins, const vec3_t maxs ) {
+	if( cl.sound_cms ) {
+		return CM_FindTopNodeForBox( cl.sound_cms, mins, maxs );
+	}
+	return 0;
+}
+
+static int CL_SoundModule_FindTopNodeForSphere( const vec3_t center, float radius ) {
+	if( cl.sound_cms ) {
+		return CM_FindTopNodeForSphere( cl.sound_cms, center, radius );
+	}
+	return  0;
 }
 
 static const char *CL_SoundModule_GetConfigString( int index ) {
@@ -313,6 +330,8 @@ void CL_SoundModule_Init( bool verbose ) {
 	import.NumLeafs = CL_SoundModule_NumLeafs;
 	import.GetLeafBounds = CL_SoundModule_GetLeafBounds;
 	import.LeafsInPVS = CL_SoundModule_LeafsInPVS;
+	import.FindTopNodeForBox = CL_SoundModule_FindTopNodeForBox;
+	import.FindTopNodeForSphere = CL_SoundModule_FindTopNodeForSphere;
 
 	import.GetConfigString = CL_SoundModule_GetConfigString;
 
