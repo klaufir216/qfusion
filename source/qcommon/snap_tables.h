@@ -57,10 +57,11 @@ class SnapVisTable {
 
 	cmodel_state_t *const cms;
 	int8_t *table;
+	float collisionWorldRadius;
 
 	explicit SnapVisTable( cmodel_state_t *cms_ );
 
-	bool CastRay( const vec3_t from, const vec3_t to );
+	bool CastRay( const vec3_t from, const vec3_t to, int topNodeHint );
 	bool DoCullingByCastingRays( const edict_t *clientEnt, const vec3_t viewOrigin, const edict_t *targetEnt );
 
 	void MarkCachedResult( int entNum1, int entNum2, bool isVisible ) {

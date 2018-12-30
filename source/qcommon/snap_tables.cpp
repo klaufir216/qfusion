@@ -2,6 +2,7 @@
 #include "../gameshared/gs_public.h"
 #include "../gameshared/q_comref.h"
 #include "../qalgo/SingletonHolder.h"
+#include "cm_local.h"
 
 static SingletonHolder<SnapShadowTable> shadowTableHolder;
 
@@ -46,16 +47,17 @@ SnapVisTable::SnapVisTable( cmodel_state_t *cms_ ): cms( cms_ ) {
 	if( !table ) {
 		Com_Error( ERR_FATAL, "Can't allocate snapshots visibility table" );
 	}
+	collisionWorldRadius = 0.5f * std::sqrt( DistanceSquared( cms->world_mins, cms->world_maxs ) ) + 1.0f;
 }
 
-bool SnapVisTable::CastRay( const vec3_t from, const vec3_t to ) {
+bool SnapVisTable::CastRay( const vec3_t from, const vec3_t to, int topNodeHint ) {
 	// Account for degenerate cases
 	if( DistanceSquared( from, to ) < 16 * 16 ) {
 		return true;
 	}
 
 	trace_t trace;
-	CM_TransformedBoxTrace( cms, &trace, (float *)from, (float *)to, vec3_origin, vec3_origin, NULL, MASK_SOLID, NULL, NULL );
+	CM_TransformedBoxTrace( cms, &trace, from, to, vec3_origin, vec3_origin, NULL, MASK_SOLID, NULL, NULL, topNodeHint );
 
 	if( trace.fraction == 1.0f ) {
 		return true;
@@ -125,20 +127,33 @@ bool SnapVisTable::DoCullingByCastingRays( const edict_t *clientEnt, const vec3_
 	vec3_t to;
 	VectorCopy( targetEnt->s.origin, to );
 
+	int topNodeHint = 0;
+	vec3_t hintBounds[2];
+	// Check whether we're going to get a useful hint
+	// (client and target should be relatively close to be placed deep in a BSP tree)
+	if( DistanceSquared( clientEnt->s.origin, targetEnt->s.origin ) < collisionWorldRadius * collisionWorldRadius ) {
+		ClearBounds( hintBounds[0], hintBounds[1] );
+		AddPointToBounds( clientEnt->r.absmin, hintBounds[0], hintBounds[1] );
+		AddPointToBounds( clientEnt->r.absmax, hintBounds[0], hintBounds[1] );
+		AddPointToBounds( targetEnt->r.absmin, hintBounds[0], hintBounds[1] );
+		AddPointToBounds( targetEnt->r.absmax, hintBounds[0], hintBounds[1] );
+		topNodeHint = CM_FindTopNodeForBox( cms, hintBounds[0], hintBounds[1] );
+	}
+
 	// Do a first raycast to the entity origin for a fast cutoff
-	if( CastRay( viewOrigin, to ) ) {
+	if( CastRay( viewOrigin, to, topNodeHint ) ) {
 		return false;
 	}
 
 	// Do a second raycast at the entity chest/eyes level
 	to[2] += targetClient->ps.viewheight;
-	if( CastRay( viewOrigin, to ) ) {
+	if( CastRay( viewOrigin, to, topNodeHint ) ) {
 		return false;
 	}
 
 	// Test a random point in entity bounds now
 	GetRandomPointInBox( targetEnt->s.origin, targetEnt->r.mins, targetEnt->r.size, to );
-	if( CastRay( viewOrigin, to ) ) {
+	if( CastRay( viewOrigin, to, topNodeHint ) ) {
 		return false;
 	}
 
@@ -156,7 +171,7 @@ bool SnapVisTable::DoCullingByCastingRays( const edict_t *clientEnt, const vec3_
 		to[0] = targetEnt->s.origin[0] + bounds[(i >> 2) & 1][0];
 		to[1] = targetEnt->s.origin[1] + bounds[(i >> 1) & 1][1];
 		to[2] = targetEnt->s.origin[2] + bounds[(i >> 0) & 1][2];
-		if( CastRay( viewOrigin, to ) ) {
+		if( CastRay( viewOrigin, to, topNodeHint ) ) {
 			return false;
 		}
 	}
@@ -171,6 +186,26 @@ bool SnapVisTable::DoCullingByCastingRays( const edict_t *clientEnt, const vec3_
 
 	float xerpTimeSeconds = 0.001f * ( 100 + povClient->r.ping );
 	clamp_high( xerpTimeSeconds, 0.275f );
+
+	// Check whether the former hint was useful.
+	// The new hint is not going to be more narrow.
+	if( topNodeHint > 3 ) {
+		// Extrapolate bounds shifted by velocities
+		vec3_t xerpPovBounds[2], xerpTargetBounds[2];
+		VectorMA( clientEnt->r.absmin, xerpTimeSeconds, povVelocity, xerpPovBounds[0] );
+		VectorMA( clientEnt->r.absmax, xerpTimeSeconds, povVelocity, xerpPovBounds[1] );
+		VectorMA( targetEnt->r.absmin, xerpTimeSeconds, targetVelocity, xerpTargetBounds[0] );
+		VectorMA( targetEnt->r.absmax, xerpTimeSeconds, targetVelocity, xerpTargetBounds[1] );
+		// Add new bounds to hint bounds
+		AddPointToBounds( xerpPovBounds[0], hintBounds[0], hintBounds[1] );
+		AddPointToBounds( xerpPovBounds[1], hintBounds[0], hintBounds[1] );
+		AddPointToBounds( xerpTargetBounds[0], hintBounds[0], hintBounds[1] );
+		AddPointToBounds( xerpTargetBounds[1], hintBounds[0], hintBounds[1] );
+		topNodeHint = CM_FindTopNodeForBox( cms, hintBounds[0], hintBounds[1] );
+	} else {
+		// Invalidate hint as we are changing trace region bounds (start from the BSP root)
+		topNodeHint = 0;
+	}
 
 	// We want to test the trajectory in "continuous" way.
 	// Use a fixed small trajectory step and adjust the timestep using it.
@@ -192,7 +227,7 @@ bool SnapVisTable::DoCullingByCastingRays( const edict_t *clientEnt, const vec3_
 		VectorMA( targetEnt->s.origin, secondsAhead, vec3_origin, xerpEntOrigin );
 
 		GetRandomPointInBox( xerpEntOrigin, targetEnt->r.mins, targetEnt->r.size, to );
-		if( CastRay( from, to ) ) {
+		if( CastRay( from, to, topNodeHint ) ) {
 			return false;
 		}
 	}
