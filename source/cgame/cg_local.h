@@ -389,7 +389,7 @@ typedef struct {
 
 #define PREDICTED_STEP_TIME 150 // stairs smoothing time
 #define MAX_AWARD_LINES 3
-#define MAX_AWARD_DISPLAYTIME 5000
+#define MAX_AWARD_DISPLAYTIME 1500
 
 // view types
 enum {
