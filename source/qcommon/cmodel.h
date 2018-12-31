@@ -35,10 +35,10 @@ int CM_EntityStringLen( const cmodel_state_t *cms );
 const char *CM_ShaderrefName( cmodel_state_t *cms, int ref );
 
 // creates a clipping hull for an arbitrary bounding box
-struct cmodel_s *CM_ModelForBBox( cmodel_state_t *cms, vec3_t mins, vec3_t maxs );
-struct cmodel_s *CM_OctagonModelForBBox( cmodel_state_t *cms, vec3_t mins, vec3_t maxs );
+struct cmodel_s *CM_ModelForBBox( cmodel_state_t *cms, const vec3_t mins, const vec3_t maxs );
+struct cmodel_s *CM_OctagonModelForBBox( cmodel_state_t *cms, const vec3_t mins, const vec3_t maxs );
 
-void CM_InlineModelBounds( cmodel_state_t *cms, struct cmodel_s *cmodel, vec3_t mins, vec3_t maxs );
+void CM_InlineModelBounds( const cmodel_state_t *cms, const struct cmodel_s *cmodel, vec3_t mins, vec3_t maxs );
 
 /**
  * Given a box defined by bounds finds a best enclosing it BSP node.

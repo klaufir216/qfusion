@@ -181,7 +181,7 @@ void CM_InitOctagonHull( cmodel_state_t *cms ) {
 *
 * To keep everything totally uniform, bounding boxes are turned into inline models
 */
-cmodel_t *CM_ModelForBBox( cmodel_state_t *cms, vec3_t mins, vec3_t maxs ) {
+cmodel_t *CM_ModelForBBox( cmodel_state_t *cms, const vec3_t mins, const vec3_t maxs ) {
 	cbrushside_t *sides = cms->box_brush->brushsides;
 	sides[0].plane.dist = maxs[0];
 	sides[1].plane.dist = -mins[0];
@@ -202,7 +202,7 @@ cmodel_t *CM_ModelForBBox( cmodel_state_t *cms, vec3_t mins, vec3_t maxs ) {
 * Same as CM_ModelForBBox with 4 additional planes at corners.
 * Internally offset to be symmetric on all sides.
 */
-cmodel_t *CM_OctagonModelForBBox( cmodel_state_t *cms, vec3_t mins, vec3_t maxs ) {
+cmodel_t *CM_OctagonModelForBBox( cmodel_state_t *cms, const vec3_t mins, const vec3_t maxs ) {
 	int i;
 	float a, b, d, t;
 	float sina, cosa;

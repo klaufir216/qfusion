@@ -78,57 +78,72 @@ static inline int64_t trap_Milliseconds( void ) {
 	return GAME_IMPORT.Milliseconds();
 }
 
-static inline bool trap_inPVS( const vec3_t p1, const vec3_t p2 ) {
+inline bool trap_inPVS( const vec3_t p1, const vec3_t p2 ) {
 	return GAME_IMPORT.inPVS( p1, p2 ) == true;
 }
 
-static inline int trap_CM_TransformedPointContents( vec3_t p, struct cmodel_s *cmodel, vec3_t origin, vec3_t angles ) {
-	return GAME_IMPORT.CM_TransformedPointContents( p, cmodel, origin, angles );
+inline int trap_CM_TransformedPointContents( const vec3_t p, const struct cmodel_s *cmodel,
+											 const vec3_t origin, const vec3_t angles, int topNodeHint = 0 ) {
+	return GAME_IMPORT.CM_TransformedPointContents( p, cmodel, origin, angles, topNodeHint );
 }
 
-static inline void trap_CM_TransformedBoxTrace( trace_t *tr, vec3_t start, vec3_t end, vec3_t mins, vec3_t maxs, struct cmodel_s *cmodel, int brushmask, vec3_t origin, vec3_t angles ) {
-	GAME_IMPORT.CM_TransformedBoxTrace( tr, start, end, mins, maxs, cmodel, brushmask, origin, angles );
+inline void trap_CM_TransformedBoxTrace( trace_t *tr, const vec3_t start, const vec3_t end, const vec3_t mins,
+										 const vec3_t maxs, const struct cmodel_s *cmodel, int brushmask,
+										 const vec3_t origin, const vec3_t angles, int topNodeHint = 0 ) {
+	GAME_IMPORT.CM_TransformedBoxTrace( tr, start, end, mins, maxs, cmodel, brushmask, origin, angles, topNodeHint );
 }
 
-static inline int trap_CM_NumInlineModels( void ) {
+inline int trap_CM_NumInlineModels() {
 	return GAME_IMPORT.CM_NumInlineModels();
 }
 
-static inline struct cmodel_s *trap_CM_InlineModel( int num ) {
+inline struct cmodel_s *trap_CM_InlineModel( int num ) {
 	return GAME_IMPORT.CM_InlineModel( num );
 }
 
-static inline void trap_CM_InlineModelBounds( struct cmodel_s *cmodel, vec3_t mins, vec3_t maxs ) {
+inline void trap_CM_InlineModelBounds( const struct cmodel_s *cmodel, vec3_t mins, vec3_t maxs ) {
 	GAME_IMPORT.CM_InlineModelBounds( cmodel, mins, maxs );
 }
 
-static inline struct cmodel_s *trap_CM_ModelForBBox( vec3_t mins, vec3_t maxs ) {
+inline struct cmodel_s *trap_CM_ModelForBBox( const vec3_t mins, const vec3_t maxs ) {
 	return GAME_IMPORT.CM_ModelForBBox( mins, maxs );
 }
 
-static inline struct cmodel_s *trap_CM_OctagonModelForBBox( vec3_t mins, vec3_t maxs ) {
+inline struct cmodel_s *trap_CM_OctagonModelForBBox( const vec3_t mins, const vec3_t maxs ) {
 	return GAME_IMPORT.CM_OctagonModelForBBox( mins, maxs );
 }
 
-static inline void trap_CM_SetAreaPortalState( int area, int otherarea, bool open ) {
+inline void trap_CM_SetAreaPortalState( int area, int otherarea, bool open ) {
 	GAME_IMPORT.CM_SetAreaPortalState( area, otherarea, open == true ? true : false );
 }
 
-static inline bool trap_CM_AreasConnected( int area1, int area2 ) {
+inline bool trap_CM_AreasConnected( int area1, int area2 ) {
 	return GAME_IMPORT.CM_AreasConnected( area1, area2 ) == true;
 }
 
-static inline int trap_CM_BoxLeafnums( vec3_t mins, vec3_t maxs, int *list, int listsize, int *topnode ) {
-	return GAME_IMPORT.CM_BoxLeafnums( mins, maxs, list, listsize, topnode );
+inline int trap_CM_BoxLeafnums( const vec3_t mins, const vec3_t maxs, int *list,
+								int listsize, int *topnode, int topNodeHint = 0 ) {
+	return GAME_IMPORT.CM_BoxLeafnums( mins, maxs, list, listsize, topnode, topNodeHint );
 }
-static inline int trap_CM_LeafCluster( int leafnum ) {
+
+inline int trap_CM_LeafCluster( int leafnum ) {
 	return GAME_IMPORT.CM_LeafCluster( leafnum );
 }
-static inline int trap_CM_LeafArea( int leafnum ) {
+
+inline int trap_CM_LeafArea( int leafnum ) {
 	return GAME_IMPORT.CM_LeafArea( leafnum );
 }
-static inline int trap_CM_LeafsInPVS( int leafnum1, int leafnum2 ) {
+
+inline int trap_CM_LeafsInPVS( int leafnum1, int leafnum2 ) {
 	return GAME_IMPORT.CM_LeafsInPVS( leafnum1, leafnum2 );
+}
+
+inline int trap_CM_FindTopNodeForBox( const vec3_t mins, const vec3_t maxs, unsigned maxValue = ~( 0u ) ) {
+	return GAME_IMPORT.CM_FindTopNodeForBox( mins, maxs, maxValue );
+}
+
+inline int trap_CM_FindTopNodeForSphere( const vec3_t center, float radius, unsigned maxValue = ~( 0u ) ) {
+	return GAME_IMPORT.CM_FindTopNodeForSphere( center, radius, maxValue );
 }
 
 static inline ATTRIBUTE_MALLOC void *trap_MemAlloc( size_t size, const char *filename, int fileline ) {
