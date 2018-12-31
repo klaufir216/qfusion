@@ -33,11 +33,11 @@ void MovementPredictionContext::NextReachNumAndTravelTimeToNavTarget( int *reach
 }
 
 BaseMovementAction *MovementPredictionContext::GetCachedActionAndRecordForCurrTime( MovementActionRecord *record_ ) {
-	const int64_t levelTime = level.time;
+	const int64_t realTime = game.realtime;
 	PredictedMovementAction *prevPredictedAction = nullptr;
 	PredictedMovementAction *nextPredictedAction = nullptr;
 	for( PredictedMovementAction &predictedAction: predictedMovementActions ) {
-		if( predictedAction.timestamp >= levelTime ) {
+		if( predictedAction.timestamp >= realTime ) {
 			nextPredictedAction = &predictedAction;
 			break;
 		}
@@ -53,7 +53,7 @@ BaseMovementAction *MovementPredictionContext::GetCachedActionAndRecordForCurrTi
 
 	if( !prevPredictedAction ) {
 		// If there were no activated actions, the next state must be recently computed for current level time.
-		Assert( nextPredictedAction->timestamp == levelTime );
+		Assert( nextPredictedAction->timestamp == realTime );
 		// These assertions have already spotted a bug
 		Assert( VectorCompare( nextPredictedAction->entityPhysicsState.Origin(), self->s.origin ) );
 		Assert( VectorCompare( nextPredictedAction->entityPhysicsState.Velocity(), self->velocity ) );
@@ -74,7 +74,7 @@ BaseMovementAction *MovementPredictionContext::GetCachedActionAndRecordForCurrTi
 	}
 
 	// Check whether predicted action is valid for an actual bot entity physics state
-	float stateLerpFrac = (float)( levelTime - prevPredictedAction->timestamp );
+	float stateLerpFrac = (float)( realTime - prevPredictedAction->timestamp );
 	stateLerpFrac *= 1.0f / ( nextPredictedAction->timestamp - prevPredictedAction->timestamp );
 	Assert( stateLerpFrac > 0 && stateLerpFrac <= 1.0f );
 	const char *format =
@@ -152,16 +152,16 @@ BaseMovementAction *MovementPredictionContext::GetCachedActionAndRecordForCurrTi
 	}
 
 	// If next predicted state is likely to be completed next frame, use its input as-is (except the velocity)
-	if( nextPredictedAction->timestamp - levelTime <= game.frametime ) {
+	if( nextPredictedAction->timestamp - realTime <= game.frametime ) {
 		*record_ = nextPredictedAction->record;
 		// Apply modified velocity only once for an exact timestamp
-		if( nextPredictedAction->timestamp != levelTime ) {
+		if( nextPredictedAction->timestamp != realTime ) {
 			record_->hasModifiedVelocity = false;
 		}
 		return nextPredictedAction->action;
 	}
 
-	float inputLerpFrac = game.frametime / ( (float)( nextPredictedAction->timestamp - levelTime ) );
+	float inputLerpFrac = game.frametime / ( (float)( nextPredictedAction->timestamp - realTime ) );
 	Assert( inputLerpFrac > 0 && inputLerpFrac <= 1.0f );
 	// If next predicted time is likely to be pending next frame again, interpolate input for a single frame ahead
 	*record_ = nextPredictedAction->record;
@@ -482,9 +482,8 @@ void MovementPredictionContext::SetupStackForStep() {
 		pendingWeaponsStack.push_back( belowTopOfStack.record.pendingWeapon );
 
 		oldStepMillis = belowTopOfStack.stepMillis;
-		Assert( belowTopOfStack.timestamp >= level.time );
 		Assert( belowTopOfStack.stepMillis > 0 );
-		totalMillisAhead = (unsigned)( belowTopOfStack.timestamp - level.time ) + belowTopOfStack.stepMillis;
+		totalMillisAhead = (unsigned)( belowTopOfStack.timestamp ) + belowTopOfStack.stepMillis;
 	} else {
 		predictedMovementActions.clear();
 		botMovementStatesStack.clear();
@@ -925,6 +924,17 @@ void MovementPredictionContext::BuildPlan() {
 
 	for( auto *movementAction: module->movementActions )
 		movementAction->AfterPlanning();
+
+	// We must have at least a single predicted action (maybe dummy one)
+	assert( !predictedMovementActions.empty() );
+	// The first predicted action should not have any offset from the current time
+	assert( predictedMovementActions[0].timestamp == 0 );
+	for( auto &predictedAction: predictedMovementActions ) {
+		// Check whether this value contains only positive relative offset from the current time
+		assert( (uint64_t)predictedAction.timestamp < 30000 );
+		// Convert to a timestamp based on the real time
+		predictedAction.timestamp += game.realtime;
+	}
 }
 
 void MovementPredictionContext::NextMovementStep() {

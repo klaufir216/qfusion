@@ -161,7 +161,7 @@ inline void MovementPredictionContext::SaveActionOnStack( BaseMovementAction *ac
 	topOfStack->action = action;
 	// Make sure the angles can always be modified for input interpolation or aiming
 	topOfStack->record.botInput.hasAlreadyComputedAngles = false;
-	topOfStack->timestamp = level.time + this->totalMillisAhead;
+	topOfStack->timestamp = this->totalMillisAhead;
 
 #ifdef ENABLE_MOVEMENT_ASSERTIONS
 	constexpr auto *tag = "MovementPredictionContext::SaveActionOnStack()";
@@ -259,7 +259,7 @@ inline unsigned MovementPredictionContext::MillisAheadForFrameStart( unsigned fr
 	}
 #endif
 	if( frameIndex < topOfStackIndex ) {
-		return (unsigned)( predictedMovementActions[frameIndex].timestamp - level.time );
+		return (unsigned)( predictedMovementActions[frameIndex].timestamp );
 	}
 	return totalMillisAhead;
 }
