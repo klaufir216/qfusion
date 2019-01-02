@@ -3,6 +3,7 @@
 #include "navigation/NavMeshManager.h"
 #include "teamplay/ObjectiveBasedTeam.h"
 #include "../g_gametypes.h"
+#include "ai_manager.h"
 #include <algorithm>
 #include <array>
 
@@ -494,4 +495,16 @@ bool Bot::IsCombatCrouchingAllowed() const {
 	}
 
 	return false;
+}
+
+bool Bot::TryGetExtraComputationQuota() const {
+	return MillisInBlockedState() < 100 && AiManager::Instance()->TryGetExpensiveComputationQuota( this );
+}
+
+bool Bot::TryGetVitalComputationQuota() const {
+	return AiManager::Instance()->TryGetExpensiveComputationQuota( this );
+}
+
+bool Bot::TryGetExpensiveThinkCallQuota() const {
+	return AiManager::Instance()->TryGetExpensiveThinkCallQuota( this );
 }

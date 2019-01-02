@@ -552,6 +552,26 @@ public:
 	bool IsCombatDashingAllowed() const;
 	// Whether it is allowed to crouch right now
 	bool IsCombatCrouchingAllowed() const;
+
+	/**
+	 * A wrapper over {@code AiManager::TryGetExpensiveComputationQuota()}.
+	 * Should be used for situations where computations are not
+	 * necessary for a bot lifecycle (but could improve behaviour).
+	 */
+	bool TryGetExtraComputationQuota() const;
+
+	/**
+	 * A wrapper over {@code AiManager::TryGetExpensiveComputationQuota()}.
+	 * Should be used for situations where computations are mandatory
+	 * for a bot lifecycle (e.g. a bot is blocked and has to suicide otherwise having no solution).
+	 */
+	bool TryGetVitalComputationQuota() const;
+
+	/**
+	 * A wrapper over {@code AiManager::TryGetExpensiveThinkCallQuota()}.
+	 * Provided for consistency.
+	 */
+	bool TryGetExpensiveThinkCallQuota() const;
 };
 
 #endif

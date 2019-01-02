@@ -421,7 +421,7 @@ void BestNavMeshPolyJumpableSpotDetector::FillCandidateSpotsWithoutRoutingTest( 
 
 MovementFallback *FallbackMovementAction::TryFindJumpToSpotFallback( Context *context, bool testTravelTime ) {
 	// Cut off these extremely expensive computations
-	if( !AiManager::Instance()->TryGetExpensiveComputationQuota( bot ) ) {
+	if( !bot->TryGetVitalComputationQuota() ) {
 		return nullptr;
 	}
 
@@ -673,7 +673,7 @@ MovementFallback *FallbackMovementAction::TryFindLostNavTargetFallback( Context 
 	Assert( !context->NavTargetAasAreaNum() );
 
 	// This code is extremely expensive, prevent frametime spikes
-	if( AiManager::Instance()->TryGetExpensiveComputationQuota( bot ) ) {
+	if( !bot->TryGetVitalComputationQuota() ) {
 		return nullptr;
 	}
 

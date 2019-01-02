@@ -23,19 +23,6 @@ void BunnyStraighteningReachChainAction::SaveSuggestedLookDirs( Context *context
 		return;
 	}
 
-	// Quota are allowed to be requested only once per frame,
-	// and subsequent calls for the same client fail (return with false).
-	// Never try to acquire a quota here if a bot is really blocked.
-	// These predicted actions are very likely to fail again,
-	// and fallbacks do not get their quotas leading to blocking to bot suicide.
-	if( bot->MillisInBlockedState() < 100 && AiManager::Instance()->TryGetExpensiveComputationQuota( bot ) ) {
-		this->maxSuggestedLookDirs = ( 2 * MAX_SUGGESTED_LOOK_DIRS ) / 3;
-	} else {
-		// The value has been increased since we have removed some useless actions
-		// that mainly used just consume CPU cycles without any yield
-		this->maxSuggestedLookDirs = 3;
-	}
-
 	const AiAasWorld *aasWorld = AiAasWorld::Instance();
 	const aas_reachability_t *aasReach = aasWorld->Reachabilities();
 
@@ -64,6 +51,21 @@ void BunnyStraighteningReachChainAction::SaveSuggestedLookDirs( Context *context
 
 	AreaAndScore candidates[MAX_TESTED_REACH];
 	AreaAndScore *candidatesEnd = SelectCandidateAreas( context, candidates, (unsigned)lastValidReachIndex );
+
+	const auto numCandidates = (unsigned)( candidatesEnd - candidates );
+	if( numCandidates > 3 ) {
+		// Check whether a computation quota disallows testing too many directions.
+		// (we try to defer Bot::TryGet*ComputationsQuota()) call as far as possible.
+		// Set maxSuggestedLookDirs appropriately
+		if( !bot->TryGetExtraComputationQuota() ) {
+			maxSuggestedLookDirs = 3;
+		} else {
+			maxSuggestedLookDirs = ( 2 * MAX_SUGGESTED_LOOK_DIRS ) / 3;
+		}
+	}
+
+	// Limit candidates range
+	candidatesEnd = candidates + std::min( numCandidates, maxSuggestedLookDirs );
 
 	SaveCandidateAreaDirs( context, candidates, candidatesEnd );
 	Assert( suggestedLookDirs.size() <= maxSuggestedLookDirs );

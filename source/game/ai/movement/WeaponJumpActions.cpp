@@ -159,14 +159,6 @@ void ScheduleWeaponJumpAction::PlanPredictionStep( Context *context ) {
 		return;
 	}
 
-	// Do it after all other tests have been passed and only routing/trajectory prediction tests are left.
-	// Otherwise the bot would often lock the quotum fruitlessly.
-	if( !AiManager::Instance()->TryGetExpensiveComputationQuota( bot ) ) {
-		Debug( "Cannot acquire an expensive computations CPU quota\n" );
-		this->SwitchOrRollback( context, &DefaultWalkAction() );
-		return;
-	}
-
 	AasElementsMask::AreasMask()->Clear();
 	PrecacheBotLeafs( context );
 
@@ -203,6 +195,23 @@ inline const int *ScheduleWeaponJumpAction::GetTravelTimesForReachChainShortcut(
 	}
 
 	return dummyTravelTimes;
+}
+
+inline bool ScheduleWeaponJumpAction::TryGetComputationQuota() const {
+	if( !hasTestedComputationQuota ) {
+		// We can use weapon jumping for escaping from blocked state that's why it's "vital"
+		hasAcquiredComputationQuota = bot->TryGetVitalComputationQuota();
+		hasTestedComputationQuota = true;
+	}
+	return hasAcquiredComputationQuota;
+}
+
+inline float ScheduleWeaponJumpAction::EstimateMapComputationalComplexity() const {
+	int numAreas = AiAasWorld::Instance()->NumAreas();
+	assert( numAreas < std::numeric_limits<uint16_t>::max() );
+	float f = 1.0f - ( numAreas / (float)std::numeric_limits<uint16_t>::max() );
+	assert( f >= 0.0f && f <= 1.0f );
+	return 1.0f - f * f;
 }
 
 int ScheduleWeaponJumpAction::GetCandidatesForReachChainShortcut( Context *context, int *areaNums ) {
@@ -275,8 +284,24 @@ bool ScheduleWeaponJumpAction::TryJumpDirectlyToTarget( Context *context, const 
 	vec3_t jumpTargets[MAX_AREAS];
 
 	const int numRawCandidateAreas = GetCandidatesForJumpingToTarget( context, areaNums );
-	const int numFilteredRawAreas = FilterRawCandidateAreas( context, areaNums, numRawCandidateAreas );
+	int numFilteredRawAreas = FilterRawCandidateAreas( context, areaNums, numRawCandidateAreas );
+
+	// Expensive stuff starts below
+
+	const float complexityFactor = EstimateMapComputationalComplexity();
+	if( numFilteredRawAreas > 24 - 16.0f * complexityFactor ) {
+		if( !TryGetComputationQuota() ) {
+			return false;
+		}
+	}
+
 	int numPassedReachTestAreas = ReachTestNearbyTargetAreas( context, areaNums, travelTimes, numFilteredRawAreas );
+	if( numPassedReachTestAreas > 5 - 4.0f * complexityFactor ) {
+		if( !TryGetComputationQuota() ) {
+			return false;
+		}
+	}
+
 	PrepareJumpTargets( context, areaNums, jumpTargets, numPassedReachTestAreas );
 
 	::weaponJumpWeaponsTester.SetSpotData( areaNums, travelTimes, jumpTargets, numPassedReachTestAreas );
@@ -495,6 +520,13 @@ bool ScheduleWeaponJumpAction::TryShortcutReachChain( Context *context, const in
 
 	int numRawAreas = GetCandidatesForReachChainShortcut( context, areaNums );
 	int numFilteredAreas = FilterRawCandidateAreas( context, areaNums, numRawAreas );
+
+	if( numFilteredAreas > 5 - 4.0f * EstimateMapComputationalComplexity() ) {
+		if( !TryGetComputationQuota() ) {
+			return false;
+		}
+	}
+
 	PrepareJumpTargets( context, areaNums, jumpTargets, numFilteredAreas );
 
 	::weaponJumpWeaponsTester.SetWeapons( suitableWeapons, numWeapons );

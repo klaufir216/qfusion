@@ -243,7 +243,7 @@ void BotAwarenessModule::UpdateBlockedAreasStatus() {
 		return;
 	}
 
-	if( !AiManager::Instance()->TryGetExpensiveThinkCallQuota( self->ai->botRef ) ) {
+	if( !self->ai->botRef->TryGetExpensiveThinkCallQuota() ) {
 		return;
 	}
 
