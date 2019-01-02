@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <new>
 
 #include "g_local.h"
+#include "g_callvotes.h"
 
 game_locals_t game;
 level_locals_t level;
@@ -395,7 +396,7 @@ void G_Shutdown( void ) {
 
 	G_RemoveCommands();
 
-	G_FreeCallvotes();
+	VotingSystem::Shutdown();
 
 	ChatHandlersChain::Shutdown();
 	StatsowFacade::Shutdown();

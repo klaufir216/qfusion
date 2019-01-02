@@ -714,17 +714,15 @@ void G_SetBoundsForSpanEntity( edict_t *ent, vec_t size );
 //
 // g_callvotes.c
 //
-void G_CallVotes_Init( void );
-void G_FreeCallvotes( void );
-void G_CallVotes_Reset( void );
-void G_CallVotes_ResetClient( int n );
+//void G_CallVotes_Init( void );
+//void G_FreeCallvotes( void );
+//void G_CallVotes_Reset( void );
+//void G_CallVotes_ResetClient( int n );
 void G_CallVotes_CmdVote( edict_t *ent );
 void G_CallVotes_Think( void );
 void G_CallVote_Cmd( edict_t *ent );
 void G_OperatorVote_Cmd( edict_t *ent );
 void G_RegisterGametypeScriptCallvote( const char *name, const char *usage, const char *type, const char *help );
-http_response_code_t G_CallVotes_WebRequest( http_query_method_t method, const char *resource,
-											 const char *query_string, char **content, size_t *content_length );
 
 // Warning: not reentrant
 const char *G_GetClientHostForFilter( const edict_t *ent );
@@ -1170,8 +1168,6 @@ typedef struct client_levelreset_s {
 	int64_t flood_team_when[MAX_FLOOD_MESSAGES];   // when messages were said
 	int flood_team_whenhead;        // head pointer for when said
 
-	int64_t callvote_when;
-
 	char quickMenuItems[1024];
 
 	void Reset() {
@@ -1194,7 +1190,6 @@ typedef struct client_levelreset_s {
 		flood_whenhead = 0;
 		memset( flood_team_when, 0, sizeof( flood_team_when ) );
 
-		callvote_when = 0;
 		memset( quickMenuItems, 0, sizeof( quickMenuItems ) );
 	}
 } client_levelreset_t;
@@ -1877,6 +1872,40 @@ static inline int PLAYERNUM( const edict_t *x ) { return x - game.edicts - 1; }
 static inline int PLAYERNUM( const gclient_t *x ) { return x - game.clients; }
 
 static inline edict_t *PLAYERENT( int x ) { return game.edicts + x + 1; }
+
+struct GWebRequest {
+	http_query_method_t method;
+	const char *resource;
+	const char *queryString;
+	char **content;
+	size_t contentLength;
+};
+
+struct GWebResponse {
+	http_response_code_t code;
+	char *content { nullptr };
+	size_t contentLength { 0 };
+
+	static GWebResponse NotFound() {
+		GWebResponse result;
+		result.code = HTTP_RESP_NOT_FOUND;
+		return result;
+	}
+
+	static GWebResponse BadRequest() {
+		GWebResponse result;
+		result.code = HTTP_RESP_BAD_REQUEST;
+		return result;
+	}
+
+	static GWebResponse Ok( char *content, size_t contentLength ) {
+		GWebResponse result;
+		result.code = HTTP_RESP_OK;
+		result.content = content;
+		result.contentLength = contentLength;
+		return result;
+	}
+};
 
 // web
 http_response_code_t G_WebRequest( http_query_method_t method, const char *resource,

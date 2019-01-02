@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "g_local.h"
+#include "g_voting_system.h"
 
 /*
 * G_WebRequest
@@ -27,8 +28,20 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 http_response_code_t G_WebRequest( http_query_method_t method, const char *resource,
 								   const char *query_string, char **content, size_t *content_length ) {
-	if( !Q_strnicmp( resource, "callvote", 8 ) ) {
-		return G_CallVotes_WebRequest( method, resource, query_string, content, content_length );
+	if( Q_strnicmp( resource, "callvote", 8 ) != 0 ) {
+		return HTTP_RESP_NOT_FOUND;
 	}
-	return HTTP_RESP_NOT_FOUND;
+
+	GWebRequest request;
+	request.method = method;
+	request.resource = resource;
+	request.queryString = query_string;
+	request.content = content;
+	request.contentLength = *content_length;
+
+	GWebResponse response( VotingSystem::Instance()->ServeWebRequest( &request ) );
+
+	*content = response.content;
+	*content_length = response.contentLength;
+	return response.code;
 }

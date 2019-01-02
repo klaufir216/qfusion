@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "g_local.h"
+#include "g_callvotes.h"
 
 const field_t fields[] = {
 	{ "classname", FOFS( classname ), F_LSTRING },
@@ -834,7 +835,7 @@ void G_InitLevel( char *mapname, char *entities, int entstrlen, int64_t levelTim
 
 	AI_AfterLevelScriptShutdown();
 
-	G_FreeCallvotes();
+	VotingSystem::Shutdown();
 
 	game.serverTime = serverTime;
 	game.realtime = realTime;
@@ -903,7 +904,9 @@ void G_InitLevel( char *mapname, char *entities, int entstrlen, int64_t levelTim
 
 	G_InitGameCommands();
 	G_MapLocations_Init();
-	G_CallVotes_Init();
+
+	VotingSystem::Init();
+
 	G_SpawnQueue_Init();
 	G_Teams_Init();
 

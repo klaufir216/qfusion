@@ -19,69 +19,96 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-#include "g_local.h"
+#include "g_callvotes.h"
 #include "../qcommon/snap.h"
+#include "../qalgo/Links.h"
+#include "../qalgo/SingletonHolder.h"
 
-//===================================================================
+/**
+ * An implementation helper.
+ * Iterates over all real (spawned and non-fake) clients and applies a function.
+ * @param apply a block to apply to every spawned real client
+ */
+static void ForEachPlayer( const std::function<void( const edict_t *, const gclient_t * )> &apply ) {
+	for( const edict_t *ent = game.edicts + 1; PLAYERNUM( ent ) < gs.maxclients; ent++ ) {
+		if( !ent->r.inuse || trap_GetClientState( PLAYERNUM( ent ) ) < CS_SPAWNED ) {
+			continue;
+		}
+		if( ( ent->r.svflags & SVF_FAKECLIENT ) ) {
+			continue;
+		}
 
-int clientVoted[MAX_CLIENTS];
-int clientVoteChanges[MAX_CLIENTS];
+		apply( ent, ent->r.client );
+	}
+}
 
-cvar_t *g_callvote_electpercentage;
-cvar_t *g_callvote_electtime;          // in seconds
-cvar_t *g_callvote_enabled;
-cvar_t *g_callvote_maxchanges;
-cvar_t *g_callvote_cooldowntime;
+/**
+ * An implementation helper.
+ * Iterates over all clients (including fake ones) and applies a function.
+ * @param apply a block to apply to every spawned real client
+ */
+static void ForEachClient( const std::function<void( const edict_t *, const gclient_t *)> &apply ) {
+	for( const edict_t *ent = game.edicts + 1; PLAYERNUM( ent ) < gs.maxclients; ent++ ) {
+		if( !ent->r.inuse || trap_GetClientState( PLAYERNUM( ent ) ) < CS_SPAWNED ) {
+			continue;
+		}
 
-enum
-{
-	VOTED_NOTHING = 0,
-	VOTED_YES,
-	VOTED_NO
-};
+		apply( ent, ent->r.client );
+	}
+}
 
-// Data that can be used by the vote specific functions
-typedef struct
-{
-	edict_t *caller;
-	bool operatorcall;
-	struct callvotetype_s *callvote;
-	int argc;
-	char *argv[MAX_STRING_TOKENS];
-	char *string;               // can be used to overwrite the displayed vote string
-	void *data;                 // any data vote wants to carry over multiple calls of validate and to execute
-} callvotedata_t;
+bool GVote::GetArgAsInt( int argNum, int *result ) {
+	const char *argString = Argv( argNum );
+	if( *argString == '\0' ) {
+		return false;
+	}
 
-typedef struct callvotetype_s
-{
-	char *name;
-	int expectedargs;               // -1 = any amount, -2 = any amount except 0
-	bool ( *validate )( callvotedata_t *data, bool first );
-	void ( *execute )( callvotedata_t *vote );
-	const char *( *current )( void );
-	void ( *extraHelp )( edict_t *ent );
-	http_response_code_t ( *webRequest )( http_query_method_t method, const char *resource,
-										  const char *query_string, char **content, size_t *content_length );
-	char *argument_format;
-	char *help;
-	char *argument_type;
-	struct callvotetype_s *next;
-} callvotetype_t;
+	char *endptr;
+	const long long rawParsedValue = ::strtoll( argString, &endptr, 10 );
+	if( *endptr != '\0' ) {
+		return false;
+	}
 
-// Data that will only be used by the common callvote functions
-typedef struct
-{
-	int64_t timeout;           // time to finish
-	callvotedata_t vote;
-} callvotestate_t;
+	if( rawParsedValue > std::numeric_limits<int32_t>::max() ) {
+		return false;
+	}
+	if( rawParsedValue < std::numeric_limits<int32_t>::min() ) {
+		return false;
+	}
 
-static callvotestate_t callvoteState;
+	*result = (int)rawParsedValue;
+	return true;
+}
 
-static callvotetype_t *callvotesHeadNode = NULL;
+inline char *CopyLevelString( const char *s ) {
+	if( s ) {
+		return G_LevelCopyString( s );
+	}
+	return nullptr;
+}
 
-//==============================================
-//		Vote specifics
-//==============================================
+inline void FreeLevelString( char *p ) {
+	if( p ) {
+		G_LevelFree( p );
+	}
+}
+
+GenericScriptVote::GenericScriptVote( const char *name_, const char *briefHelp_,
+									  const char *argFormat_, const char *argType_ )
+	: GVote( nullptr, nullptr, -1, nullptr, nullptr ) {
+	assert( name_ );
+	this->name = nameStorage = CopyLevelString( name_ );
+	this->briefHelp = helpStorage = CopyLevelString( briefHelp_ );
+	this->argFormat = formatStorage = CopyLevelString( argFormat_ );
+	this->argType = typeStorage = CopyLevelString( argType_ );
+}
+
+GenericScriptVote::~GenericScriptVote() {
+	FreeLevelString( nameStorage );
+	FreeLevelString( helpStorage );
+	FreeLevelString( formatStorage );
+	FreeLevelString( typeStorage );
+}
 
 static void G_AppendString( char **pdst, const char *src, size_t *pdst_len, size_t *pdst_size ) {
 	char *dst = *pdst;
@@ -945,6 +972,35 @@ static void G_VoteHelp_ShowPlayersList( edict_t *ent ) {
 	G_PrintMsg( ent, "%s", msg );
 }
 
+bool KickLikeVote::TryActivate() {
+	const edict_t *tokick = G_PlayerForText( Argv( 0 ) );
+	if( !tokick ) {
+		G_PrintMsg( Caller(), S_COLOR_RED "%s: No such player\n", Argv( 0 ) );
+		return false;
+	}
+
+	if( tokick->r.client->isoperator ) {
+		G_PrintMsg( Caller(), S_COLOR_RED "%s is a game operator.\n", tokick->r.client->netname );
+		return false;
+	}
+
+	// we save the player id to be kicked, so we don't later get
+	//confused by new ids or players changing names
+	this->playerId = PLAYERNUM( tokick );
+	return CheckStatus();
+}
+
+bool KickLikeVote::CheckStatus() {
+	edict_t *ent = game.edicts + playerId + 1;
+	if( !ent->r.inuse || !ent->r.client ) {
+		return false;
+	}
+
+	// TODO: Is it really needed?
+	Q_strncpyz( playerNick, ent->r.client->netname, sizeof( playerNick ) );
+	return true;
+}
+
 static bool G_SetOrValidateKickLikeCmdTarget( callvotedata_t *vote, bool first ) {
 	int who = -1;
 	if( first ) {
@@ -1690,138 +1746,12 @@ static bool G_VoteRebalanceValidate( callvotedata_t *vote, bool first ) {
 	return true;
 }
 
-//================================================
-//
-//================================================
-
-
-callvotetype_t *G_RegisterCallvote( const char *name ) {
-	callvotetype_t *callvote;
-
-	for( callvote = callvotesHeadNode; callvote != NULL; callvote = callvote->next ) {
-		if( !Q_stricmp( callvote->name, name ) ) {
-			return callvote;
-		}
-	}
-
-	// create a new callvote
-	callvote = ( callvotetype_t * )G_LevelMalloc( sizeof( callvotetype_t ) );
-	memset( callvote, 0, sizeof( callvotetype_t ) );
-	callvote->next = callvotesHeadNode;
-	callvotesHeadNode = callvote;
-
-	callvote->name = G_LevelCopyString( name );
-	return callvote;
-}
-
-void G_FreeCallvotes( void ) {
-	callvotetype_t *callvote;
-
-	while( callvotesHeadNode ) {
-		callvote = callvotesHeadNode->next;
-
-		if( callvotesHeadNode->name ) {
-			G_LevelFree( callvotesHeadNode->name );
-		}
-		if( callvotesHeadNode->argument_format ) {
-			G_LevelFree( callvotesHeadNode->argument_format );
-		}
-		if( callvotesHeadNode->help ) {
-			G_LevelFree( callvotesHeadNode->help );
-		}
-
-		G_LevelFree( callvotesHeadNode );
-		callvotesHeadNode = callvote;
-	}
-
-	callvotesHeadNode = NULL;
-}
-
-//===================================================================
-// Common functions
-//===================================================================
-
-/*
-* G_CallVotes_ResetClient
-*/
-void G_CallVotes_ResetClient( int n ) {
-	clientVoted[n] = VOTED_NOTHING;
-	clientVoteChanges[n] = g_callvote_maxchanges->integer;
-	if( clientVoteChanges[n] < 1 ) {
-		clientVoteChanges[n] = 1;
-	}
-}
-
-/*
-* G_CallVotes_Reset
-*/
-void G_CallVotes_Reset( void ) {
-	int i;
-
-	if( callvoteState.vote.caller && callvoteState.vote.caller->r.client ) {
-		callvoteState.vote.caller->r.client->level.callvote_when = game.realtime;
-	}
-
-	callvoteState.vote.callvote = NULL;
-	for( i = 0; i < gs.maxclients; i++ )
-		G_CallVotes_ResetClient( i );
-	callvoteState.timeout = 0;
-
-	callvoteState.vote.caller = NULL;
-	if( callvoteState.vote.string ) {
-		G_Free( callvoteState.vote.string );
-	}
-	if( callvoteState.vote.data ) {
-		G_Free( callvoteState.vote.data );
-	}
-	for( i = 0; i < callvoteState.vote.argc; i++ ) {
-		if( callvoteState.vote.argv[i] ) {
-			G_Free( callvoteState.vote.argv[i] );
-		}
-	}
-
-	trap_ConfigString( CS_ACTIVE_CALLVOTE, "" );
-	trap_ConfigString( CS_ACTIVE_CALLVOTE_VOTES, "" );
-
-	memset( &callvoteState, 0, sizeof( callvoteState ) );
-}
-
-/*
-* G_CallVotes_PrintUsagesToPlayer
-*/
-static void G_CallVotes_PrintUsagesToPlayer( edict_t *ent ) {
-	callvotetype_t *callvote;
-
-	G_PrintMsg( ent, "Available votes:\n" );
-	for( callvote = callvotesHeadNode; callvote != NULL; callvote = callvote->next ) {
-		if( trap_Cvar_Value( va( "g_disable_vote_%s", callvote->name ) ) ) {
-			continue;
-		}
-
-		if( callvote->argument_format ) {
-			G_PrintMsg( ent, " %s %s\n", callvote->name, callvote->argument_format );
-		} else {
-			G_PrintMsg( ent, " %s\n", callvote->name );
-		}
-	}
-}
-
-/*
-* G_CallVotes_PrintHelpToPlayer
-*/
-static void G_CallVotes_PrintHelpToPlayer( edict_t *ent, callvotetype_t *callvote ) {
-
-	if( !callvote ) {
-		return;
-	}
-
-	G_PrintMsg( ent, "Usage: %s %s\n%s%s%s\n", callvote->name,
-				( callvote->argument_format ? callvote->argument_format : "" ),
-				( callvote->current ? va( "Current: %s\n", callvote->current() ) : "" ),
-				( callvote->help ? "- " : "" ), ( callvote->help ? callvote->help : "" ) );
-	if( callvote->extraHelp != NULL ) {
-		callvote->extraHelp( ent );
-	}
+void GVote::PrintHelpTo( const edict_t *player ) {
+	const char *argFormat_ = this->argFormat ? this->argFormat : "";
+	const char *maybeDash = this->briefHelp ? "- " : "";
+	const char *briefHelp_ = this->briefHelp ? this->briefHelp : "";
+	const char *current = va( "Current: %s\n", Current() );
+	G_PrintMsg( player, "Usage: %s %s\n%s%s%s\n", this->name, argFormat_, current, maybeDash, briefHelp_ );
 }
 
 /*
@@ -1872,418 +1802,9 @@ static const char *G_CallVotes_String( const callvotedata_t *vote ) {
 	return vote->callvote->name;
 }
 
-/*
-* G_CallVotes_CheckState
-*/
-static void G_CallVotes_CheckState( void ) {
-	edict_t *ent;
-	int needvotes, yeses = 0, voters = 0, noes = 0;
-	static int64_t warntimer;
 
-	if( !callvoteState.vote.callvote ) {
-		warntimer = 0;
-		return;
-	}
 
-	if( callvoteState.vote.callvote->validate != NULL &&
-		!callvoteState.vote.callvote->validate( &callvoteState.vote, false ) ) {
-		// fixme: should be vote cancelled or something
-		G_AnnouncerSound( NULL, trap_SoundIndex( va( S_ANNOUNCER_CALLVOTE_FAILED_1_to_2, ( rand() & 1 ) + 1 ) ), GS_MAX_TEAMS, true, NULL );
-		G_PrintMsg( NULL, "Vote is no longer valid\nVote %s%s%s canceled\n", S_COLOR_YELLOW,
-					G_CallVotes_String( &callvoteState.vote ), S_COLOR_WHITE );
-		G_CallVotes_Reset();
-		return;
-	}
 
-	//analize votation state
-	for( ent = game.edicts + 1; PLAYERNUM( ent ) < gs.maxclients; ent++ ) {
-		gclient_t *client = ent->r.client;
-
-		if( !ent->r.inuse || trap_GetClientState( PLAYERNUM( ent ) ) < CS_SPAWNED ) {
-			continue;
-		}
-
-		if( ( ent->r.svflags & SVF_FAKECLIENT ) ) {
-			continue;
-		}
-
-		// ignore inactive players unless they have voted
-		if( client->level.last_activity &&
-			client->level.last_activity + ( g_inactivity_maxtime->value * 1000 ) < level.time &&
-			clientVoted[PLAYERNUM( ent )] == VOTED_NOTHING ) {
-			continue;
-		}
-
-		voters++;
-		if( clientVoted[PLAYERNUM( ent )] == VOTED_YES ) {
-			yeses++;
-		} else if( clientVoted[PLAYERNUM( ent )] == VOTED_NO ) {
-			noes++;
-		}
-	}
-
-	// passed?
-	needvotes = (int)( ( voters * g_callvote_electpercentage->value ) / 100 );
-	if( yeses > needvotes || callvoteState.vote.operatorcall ) {
-		G_AnnouncerSound( NULL, trap_SoundIndex( va( S_ANNOUNCER_CALLVOTE_PASSED_1_to_2, ( rand() & 1 ) + 1 ) ), GS_MAX_TEAMS, true, NULL );
-		G_PrintMsg( NULL, "Vote %s%s%s passed\n", S_COLOR_YELLOW,
-					G_CallVotes_String( &callvoteState.vote ), S_COLOR_WHITE );
-		if( callvoteState.vote.callvote->execute != NULL ) {
-			callvoteState.vote.callvote->execute( &callvoteState.vote );
-		}
-		G_CallVotes_Reset();
-		return;
-	}
-
-	// failed?
-	if( game.realtime > callvoteState.timeout || voters - noes <= needvotes ) { // no change to pass anymore
-		G_AnnouncerSound( NULL, trap_SoundIndex( va( S_ANNOUNCER_CALLVOTE_FAILED_1_to_2, ( rand() & 1 ) + 1 ) ), GS_MAX_TEAMS, true, NULL );
-		G_PrintMsg( NULL, "Vote %s%s%s failed\n", S_COLOR_YELLOW,
-					G_CallVotes_String( &callvoteState.vote ), S_COLOR_WHITE );
-		G_CallVotes_Reset();
-		return;
-	}
-
-	if( warntimer < game.realtime ) {
-		if( callvoteState.timeout - game.realtime <= 7500 && callvoteState.timeout - game.realtime > 2500 ) {
-			G_AnnouncerSound( NULL, trap_SoundIndex( S_ANNOUNCER_CALLVOTE_VOTE_NOW ), GS_MAX_TEAMS, true, NULL );
-		}
-		G_PrintMsg( NULL, "Vote in progress: %s%s%s, %i voted yes, %i voted no. %i required\n", S_COLOR_YELLOW,
-					G_CallVotes_String( &callvoteState.vote ), S_COLOR_WHITE, yeses, noes,
-					needvotes + 1 );
-		warntimer = game.realtime + 5 * 1000;
-	}
-}
-
-/*
-* G_CallVotes_CmdVote
-*/
-void G_CallVotes_CmdVote( edict_t *ent ) {
-	const char *vote;
-	int vote_id;
-
-	if( !ent->r.client ) {
-		return;
-	}
-	if( ( ent->r.svflags & SVF_FAKECLIENT ) ) {
-		return;
-	}
-
-	if( !callvoteState.vote.callvote ) {
-		G_PrintMsg( ent, "%sThere's no vote in progress\n", S_COLOR_RED );
-		return;
-	}
-
-	vote = trap_Cmd_Argv( 1 );
-	if( !Q_stricmp( vote, "yes" ) ) {
-		vote_id = VOTED_YES;
-	} else if( !Q_stricmp( vote, "no" ) ) {
-		vote_id = VOTED_NO;
-	} else {
-		G_PrintMsg( ent, "%sInvalid vote: %s%s%s. Use yes or no\n", S_COLOR_RED,
-					S_COLOR_YELLOW, vote, S_COLOR_RED );
-		return;
-	}
-
-	if( clientVoted[PLAYERNUM( ent )] == vote_id ) {
-		G_PrintMsg( ent, "%sYou have already voted %s\n", S_COLOR_RED, vote );
-		return;
-	}
-
-	if( clientVoteChanges[PLAYERNUM( ent )] == 0 ) {
-		G_PrintMsg( ent, "%sYou cannot change your vote anymore\n", S_COLOR_RED );
-		return;
-	}
-
-	clientVoted[PLAYERNUM( ent )] = vote_id;
-	clientVoteChanges[PLAYERNUM( ent )]--;
-	G_CallVotes_CheckState();
-}
-
-/*
-* G_CallVotes_UpdateVotesConfigString
-*
-* For clients that have already votes, sets and encodes
-* appropriate bits in the configstring.
-*/
-static void G_CallVotes_UpdateVotesConfigString( void ) {
-#define NUM_VOTEINTS ( ( MAX_CLIENTS + 31 ) / 32 )
-	int i, n;
-	int votebits[NUM_VOTEINTS];
-	char cs[MAX_CONFIGSTRING_CHARS + 1];
-
-	memset( votebits, 0, sizeof( votebits ) );
-	for( i = 0; i < gs.maxclients; i++ ) {
-		votebits[i >> 5] |= clientVoteChanges[i] == 0 ? ( 1 << ( i & 31 ) ) : 0;
-	}
-
-	// find the last bitvector that isn't 0
-	for( n = NUM_VOTEINTS; n > 0 && !votebits[n - 1]; n-- ) ;
-
-	cs[0] = cs[1] = '\0';
-	for( i = 0; i < n; i++ ) {
-		Q_strncatz( cs, va( " %x", votebits[i] ), sizeof( cs ) );
-	}
-	cs[MAX_CONFIGSTRING_CHARS] = '\0';
-
-	trap_ConfigString( CS_ACTIVE_CALLVOTE_VOTES, cs + 1 );
-}
-
-/*
-* G_CallVotes_Think
-*/
-void G_CallVotes_Think( void ) {
-	static int64_t callvotethinktimer = 0;
-
-	if( !callvoteState.vote.callvote ) {
-		callvotethinktimer = 0;
-		return;
-	}
-
-	if( callvotethinktimer < game.realtime ) {
-		G_CallVotes_UpdateVotesConfigString();
-
-		G_CallVotes_CheckState();
-		callvotethinktimer = game.realtime + 1000;
-	}
-}
-
-/*
-* G_CallVote
-*/
-static void G_CallVote( edict_t *ent, bool isopcall ) {
-	int i;
-	const char *votename;
-	callvotetype_t *callvote;
-
-	if( !isopcall && ent->s.team == TEAM_SPECTATOR && GS_InvidualGameType()
-		&& GS_MatchState() == MATCH_STATE_PLAYTIME && !GS_MatchPaused() ) {
-		int team, count;
-		edict_t *e;
-
-		for( count = 0, team = TEAM_ALPHA; team < GS_MAX_TEAMS; team++ ) {
-			if( !teamlist[team].numplayers ) {
-				continue;
-			}
-
-			for( i = 0; i < teamlist[team].numplayers; i++ ) {
-				e = game.edicts + teamlist[team].playerIndices[i];
-				if( e->r.inuse && e->r.svflags & SVF_FAKECLIENT ) {
-					count++;
-				}
-			}
-		}
-
-		if( !count ) {
-			G_PrintMsg( ent, "%sSpectators cannot start a vote while a match is in progress\n", S_COLOR_RED );
-			return;
-		}
-	}
-
-	if( !g_callvote_enabled->integer ) {
-		G_PrintMsg( ent, "%sCallvoting is disabled on this server\n", S_COLOR_RED );
-		return;
-	}
-
-	if( callvoteState.vote.callvote ) {
-		G_PrintMsg( ent, "%sA vote is already in progress\n", S_COLOR_RED );
-		return;
-	}
-
-	votename = trap_Cmd_Argv( 1 );
-	if( !votename || !votename[0] ) {
-		G_CallVotes_PrintUsagesToPlayer( ent );
-		return;
-	}
-
-	if( strlen( votename ) > MAX_QPATH ) {
-		G_PrintMsg( ent, "%sInvalid vote\n", S_COLOR_RED );
-		G_CallVotes_PrintUsagesToPlayer( ent );
-		return;
-	}
-
-	//find the actual callvote command
-	for( callvote = callvotesHeadNode; callvote != NULL; callvote = callvote->next ) {
-		if( callvote->name && !Q_stricmp( callvote->name, votename ) ) {
-			break;
-		}
-	}
-
-	//unrecognized callvote type
-	if( callvote == NULL ) {
-		G_PrintMsg( ent, "%sUnrecognized vote: %s\n", S_COLOR_RED, votename );
-		G_CallVotes_PrintUsagesToPlayer( ent );
-		return;
-	}
-
-	// wsw : pb : server admin can now disable a specific vote command (g_disable_vote_<vote name>)
-	// check if vote is disabled
-	if( !isopcall && trap_Cvar_Value( va( "g_disable_vote_%s", callvote->name ) ) ) {
-		G_PrintMsg( ent, "%sCallvote %s is disabled on this server\n", S_COLOR_RED, callvote->name );
-		return;
-	}
-
-	// allow a second cvar specific for opcall
-	if( isopcall && trap_Cvar_Value( va( "g_disable_opcall_%s", callvote->name ) ) ) {
-		G_PrintMsg( ent, "%sOpcall %s is disabled on this server\n", S_COLOR_RED, callvote->name );
-		return;
-	}
-
-	if( !isopcall && ent->r.client->level.callvote_when &&
-		( ent->r.client->level.callvote_when + g_callvote_cooldowntime->integer * 1000 > game.realtime ) ) {
-		G_PrintMsg( ent, "%sYou can not call a vote right now\n", S_COLOR_RED );
-		return;
-	}
-
-	//we got a valid type. Get the parameters if any
-	if( callvote->expectedargs != trap_Cmd_Argc() - 2 ) {
-		if( callvote->expectedargs != -1 &&
-			( callvote->expectedargs != -2 || trap_Cmd_Argc() - 2 > 0 ) ) {
-			// wrong number of parametres
-			G_CallVotes_PrintHelpToPlayer( ent, callvote );
-			return;
-		}
-	}
-
-	callvoteState.vote.argc = trap_Cmd_Argc() - 2;
-	for( i = 0; i < callvoteState.vote.argc; i++ )
-		callvoteState.vote.argv[i] = G_CopyString( trap_Cmd_Argv( i + 2 ) );
-
-	callvoteState.vote.callvote = callvote;
-	callvoteState.vote.caller = ent;
-	callvoteState.vote.operatorcall = isopcall;
-
-	//validate if there's a validation func
-	if( callvote->validate != NULL && !callvote->validate( &callvoteState.vote, true ) ) {
-		G_CallVotes_PrintHelpToPlayer( ent, callvote );
-		G_CallVotes_Reset(); // free the args
-		return;
-	}
-
-	//we're done. Proceed launching the election
-	for( i = 0; i < gs.maxclients; i++ )
-		G_CallVotes_ResetClient( i );
-	callvoteState.timeout = game.realtime + ( g_callvote_electtime->integer * 1000 );
-
-	//caller is assumed to vote YES
-	clientVoted[PLAYERNUM( ent )] = VOTED_YES;
-	clientVoteChanges[PLAYERNUM( ent )]--;
-
-	ent->r.client->level.callvote_when = callvoteState.timeout;
-
-	trap_ConfigString( CS_ACTIVE_CALLVOTE, G_CallVotes_String( &callvoteState.vote ) );
-
-	G_AnnouncerSound( NULL, trap_SoundIndex( va( S_ANNOUNCER_CALLVOTE_CALLED_1_to_2, ( rand() & 1 ) + 1 ) ), GS_MAX_TEAMS, true, NULL );
-
-	G_PrintMsg( NULL, "%s" S_COLOR_WHITE " requested to vote " S_COLOR_YELLOW "%s\n",
-				ent->r.client->netname, G_CallVotes_String( &callvoteState.vote ) );
-
-	G_PrintMsg( NULL, "Press " S_COLOR_YELLOW "F1" S_COLOR_WHITE " to " S_COLOR_YELLOW "vote yes"
-				S_COLOR_WHITE " or " S_COLOR_YELLOW "F2" S_COLOR_WHITE " to " S_COLOR_YELLOW "vote no"
-				S_COLOR_WHITE ", or cast your vote using the " S_COLOR_YELLOW "in-game menu\n" );
-
-	G_CallVotes_Think(); // make the first think
-}
-
-/*
-* G_CallVote_Cmd
-*/
-void G_CallVote_Cmd( edict_t *ent ) {
-	if( ( ent->r.svflags & SVF_FAKECLIENT ) ) {
-		return;
-	}
-	G_CallVote( ent, false );
-}
-
-/*
-* G_OperatorVote_Cmd
-*/
-void G_OperatorVote_Cmd( edict_t *ent ) {
-	edict_t *other;
-	int forceVote;
-
-	if( !ent->r.client ) {
-		return;
-	}
-	if( ( ent->r.svflags & SVF_FAKECLIENT ) ) {
-		return;
-	}
-
-	if( !ent->r.client->isoperator ) {
-		G_PrintMsg( ent, "You are not a game operator\n" );
-		return;
-	}
-
-	if( !Q_stricmp( trap_Cmd_Argv( 1 ), "help" ) ) {
-		G_PrintMsg( ent, "Opcall can be used with all callvotes and the following commands:\n" );
-		G_PrintMsg( ent, "-help\n - passvote\n- cancelvote\n- putteam\n" );
-		return;
-	}
-
-	if( !Q_stricmp( trap_Cmd_Argv( 1 ), "cancelvote" ) ) {
-		forceVote = VOTED_NO;
-	} else if( !Q_stricmp( trap_Cmd_Argv( 1 ), "passvote" ) ) {
-		forceVote = VOTED_YES;
-	} else {
-		forceVote = VOTED_NOTHING;
-	}
-
-	if( forceVote != VOTED_NOTHING ) {
-		if( !callvoteState.vote.callvote ) {
-			G_PrintMsg( ent, "There's no callvote to cancel.\n" );
-			return;
-		}
-
-		for( other = game.edicts + 1; PLAYERNUM( other ) < gs.maxclients; other++ ) {
-			if( !other->r.inuse || trap_GetClientState( PLAYERNUM( other ) ) < CS_SPAWNED ) {
-				continue;
-			}
-			if( ( other->r.svflags & SVF_FAKECLIENT ) ) {
-				continue;
-			}
-
-			clientVoted[PLAYERNUM( other )] = forceVote;
-		}
-
-		G_PrintMsg( NULL, "Callvote has been %s by %s\n",
-					forceVote == VOTED_NO ? "cancelled" : "passed", ent->r.client->netname );
-		return;
-	}
-
-	if( !Q_stricmp( trap_Cmd_Argv( 1 ), "putteam" ) ) {
-		char *splayer = trap_Cmd_Argv( 2 );
-		char *steam = trap_Cmd_Argv( 3 );
-		edict_t *playerEnt;
-		int newTeam;
-
-		if( !steam || !steam[0] || !splayer || !splayer[0] ) {
-			G_PrintMsg( ent, "Usage 'putteam <player id > <team name>'.\n" );
-			return;
-		}
-
-		if( ( newTeam = GS_Teams_TeamFromName( steam ) ) < 0 ) {
-			G_PrintMsg( ent, "The team '%s' doesn't exist.\n", steam );
-			return;
-		}
-
-		if( ( playerEnt = G_PlayerForText( splayer ) ) == NULL ) {
-			G_PrintMsg( ent, "The player '%s' couldn't be found.\n", splayer );
-			return;
-		}
-
-		if( playerEnt->s.team == newTeam ) {
-			G_PrintMsg( ent, "The player '%s' is already in team '%s'.\n", playerEnt->r.client->netname, GS_TeamName( newTeam ) );
-			return;
-		}
-
-		G_Teams_SetTeam( playerEnt, newTeam );
-		G_PrintMsg( NULL, "%s was moved to team %s by %s.\n", playerEnt->r.client->netname, GS_TeamName( newTeam ), ent->r.client->netname );
-
-		return;
-	}
-
-	G_CallVote( ent, true );
-}
 
 /*
 * G_VoteFromScriptValidate
@@ -2326,8 +1847,6 @@ static void G_VoteFromScriptPassed( callvotedata_t *vote ) {
 }
 
 /*
-* G_RegisterGametypeScriptCallvote
-*/
 void G_RegisterGametypeScriptCallvote( const char *name, const char *usage, const char *type, const char *help ) {
 	callvotetype_t *vote;
 
@@ -2344,22 +1863,17 @@ void G_RegisterGametypeScriptCallvote( const char *name, const char *usage, cons
 	vote->argument_format = usage ? G_LevelCopyString( usage ) : NULL;
 	vote->argument_type = type ? G_LevelCopyString( type ) : NULL;
 	vote->help = help ? G_LevelCopyString( va( "%s", help ) ) : NULL;
-}
+}*/
 
 /*
 * G_CallVotes_Init
 */
-void G_CallVotes_Init( void ) {
-	callvotetype_t *callvote;
+static void G_CallVotes_Init( void ) {
 
-	g_callvote_electpercentage =    trap_Cvar_Get( "g_vote_percent", "55", CVAR_ARCHIVE );
-	g_callvote_electtime =      trap_Cvar_Get( "g_vote_electtime", "40", CVAR_ARCHIVE );
-	g_callvote_enabled =        trap_Cvar_Get( "g_vote_allowed", "1", CVAR_ARCHIVE );
-	g_callvote_maxchanges =     trap_Cvar_Get( "g_vote_maxchanges", "3", CVAR_ARCHIVE );
-	g_callvote_cooldowntime =   trap_Cvar_Get( "g_vote_cooldowntime", "5", CVAR_ARCHIVE );
 
 	// register all callvotes
 
+	/*
 	callvote = G_RegisterCallvote( "map" );
 	callvote->expectedargs = 1;
 	callvote->validate = G_VoteMapValidate;
@@ -2748,66 +2262,7 @@ void G_CallVotes_Init( void ) {
 	callvote->argument_format = NULL;
 	callvote->argument_type = NULL;
 	callvote->help = G_LevelCopyString( "Rebalances teams" );
-
-	// wsw : pb : server admin can now disable a specific callvote command (g_disable_vote_<callvote name>)
-	for( callvote = callvotesHeadNode; callvote != NULL; callvote = callvote->next ) {
-		trap_Cvar_Get( va( "g_disable_vote_%s", callvote->name ), "0", CVAR_ARCHIVE );
-	}
-
-	G_CallVotes_Reset();
+	*/
 }
 
-/*
-* G_CallVotes_WebRequest
-*/
-http_response_code_t G_CallVotes_WebRequest( http_query_method_t method, const char *resource,
-											 const char *query_string, char **content, size_t *content_length ) {
-	char *msg = NULL;
-	size_t msg_len = 0, msg_size = 0;
-	callvotetype_t *callvote;
 
-	if( method != HTTP_METHOD_GET && method != HTTP_METHOD_HEAD ) {
-		return HTTP_RESP_BAD_REQUEST;
-	}
-
-	if( !Q_strnicmp( resource, "callvotes/", 10 ) ) {
-		// print the list of callvotes
-		for( callvote = callvotesHeadNode; callvote != NULL; callvote = callvote->next ) {
-			if( trap_Cvar_Value( va( "g_disable_vote_%s", callvote->name ) ) ) {
-				continue;
-			}
-
-			G_AppendString( &msg, va( "{\n"
-									  "\"name\"" " " "\"%s\"" "\n"
-									  "\"expected_args\"" " " "\"%i\"" "\n"
-									  "\"argument_format\"" " " "\"%s\"" "\n"
-									  "\"argument_type\"" " " "\"%s\"" "\n"
-									  "\"help\"" " " "\"%s\"" "\n"
-									  "}\n",
-									  callvote->name,
-									  callvote->expectedargs,
-									  callvote->argument_format ? callvote->argument_format : "",
-									  callvote->argument_type ? callvote->argument_type : "string",
-									  callvote->help ? callvote->help : ""
-									  ), &msg_len, &msg_size );
-		}
-
-		*content = msg;
-		*content_length = msg_len;
-		return HTTP_RESP_OK;
-	} else if( !Q_strnicmp( resource, "callvote/", 9 ) ) {
-		const char *votename = resource + 9;
-
-		// print the list of available arguments
-		for( callvote = callvotesHeadNode; callvote != NULL; callvote = callvote->next ) {
-			if( Q_stricmp( callvote->name, votename ) ) {
-				continue;
-			}
-			if( callvote->webRequest ) {
-				return callvote->webRequest( method, resource, query_string, content, content_length );
-			}
-			break;
-		}
-	}
-	return HTTP_RESP_NOT_FOUND;
-}
