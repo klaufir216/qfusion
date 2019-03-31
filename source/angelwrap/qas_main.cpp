@@ -57,6 +57,14 @@ void QAS_InitAngelExport( void ) {
 }
 
 int QAS_API( void ) {
+	auto [a, b] = std::make_pair( 1, 2 );
+	if( int x = a * 2; x > 2 ) {
+		printf( "foo\n" );
+	}
+	if( int y = b * 2; y > 2 ) {
+		printf( "bar\n" );
+	}
+
 	return ANGELWRAP_API_VERSION;
 }
 
