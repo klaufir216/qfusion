@@ -1,5 +1,5 @@
 sudo: false
-dist: trusty
+dist: xenial
 cache: 
   apt: true
   directories:
@@ -13,32 +13,32 @@ notifications:
 
 matrix:
   include:
-    #- os: osx
-    #  osx_image: xcode8.3
-    #  env: QF_ARCH=OSX
-    #  language: c++
-    #  compiler: clang
     - os: linux
       language: c++
-      compiler: gcc-4.9
-      env: QF_ARCH=x86
+      compiler: gcc
+      env: QF_ARCH=x86_64 QF_CC=gcc
       addons:
         apt:
           sources:
             - kubuntu-backports
             - ubuntu-toolchain-r-test
           packages:
-            - gcc-4.9
-            - g++-4.9
+            - gcc-7
+            - g++-7
             - cmake
             - build-essential
-            - gcc-4.9-multilib
-            - g++-4.9-multilib
-            - gcc-multilib
+            - libsdl2-dev
+            - libopenal-dev
+            - libjpeg8-dev
+            - libvorbis-dev
+            - libtheora-dev
+            - libfreetype6-dev
+            - zlib1g-dev
+            - libcurl4-gnutls-dev
     - os: linux
       language: c++
       compiler: clang
-      env: QF_ARCH=x86_64
+      env: QF_ARCH=x86_64 QF_CC=clang
       addons:
         apt:
           packages:
@@ -55,16 +55,14 @@ matrix:
             - libcurl4-gnutls-dev
 
 install:
-  - if [[ "$QF_ARCH" == "x86_64" ]]; then export CC=clang CXX=clang++; fi
-  - if [[ "$QF_ARCH" == "x86" ]]; then export CC=gcc-4.9 CXX=g++-4.9; fi
+  - if [[ "$QF_CC" == "clang" ]]; then export CC=clang CXX=clang++; fi
+  - if [[ "$QF_CC" == "gcc" ]]; then export CC=gcc-7 CXX=g++-7; fi
   - cd "$TRAVIS_BUILD_DIR/source"
-  - if [[ "$QF_ARCH" == "x86_64" ]]; then cmake -DQFUSION_APPLICATION_VERSION_HEADER=\"version.warsow.h\" .; fi
-  - if [[ "$QF_ARCH" == "x86" ]]; then cmake -DQFUSION_APPLICATION_VERSION_HEADER=\"version.warsow.h\" -DCMAKE_TOOLCHAIN_FILE=cmake/i386-linux-gnu.cmake -DCMAKE_C_FLAGS=-m32 -DCMAKE_CXX_FLAGS=-m32 -DGAME_MODULES_ONLY=1 .; fi
-  #- if [[ "$QF_ARCH" == "OSX" ]]; then cmake -DQFUSION_APPLICATION_VERSION_HEADER=\"version.warsow.h\" -G Xcode .; fi
+  - if [[ "$QF_CC" == "clang" ]]; then cmake -DQFUSION_APPLICATION_VERSION_HEADER=\"version.warsow.h\" .; fi
+  - if [[ "$QF_CC" == "gcc" ]]; then cmake -DQFUSION_APPLICATION_VERSION_HEADER=\"version.warsow.h\" .; fi
   - cd "$TRAVIS_BUILD_DIR"
 
 script:
   - cd source
-  - if [[ "$QF_ARCH" == "x86_64" ]]; then make -j8; fi
-  - if [[ "$QF_ARCH" == "x86" ]]; then make -j8 game cgame; fi
-  #- if [[ "$QF_ARCH" == "OSX" ]]; then xcodebuild -project qfusion.xcodeproj/ -jobs 4 -configuration Release -target ALL_BUILD; fi
+  - if [[ "$QF_CC" == "clang" ]]; then make -j8; fi
+  - if [[ "$QF_CC" == "gcc" ]]; then make -j8; fi
