@@ -8,6 +8,39 @@ BunnyStraighteningReachChainAction::BunnyStraighteningReachChainAction( BotMovem
 	supportsObstacleAvoidance = false;
 	// The constructor cannot be defined in the header due to this bot member access
 	suggestedAction = &module->bunnyToBestNavMeshPointAction;
+	maxSuggestedLookDirs = Ai::ReachChainVector::capacity();
+	Assert( maxSuggestedLookDirs < MAX_SUGGESTED_LOOK_DIRS );
+}
+
+void BunnyStraighteningReachChainAction::BeforePlanning() {
+	BunnyTestingSavedLookDirsAction::BeforePlanning();
+	// We plan to allow varying bot skill dynamically.
+	// This value should be recomputed every planning frame.
+
+	const float skill = bot->Skill();
+	// Bunny-hopping is enabled for easy bots under certain conditions. Allow only up to 2 dirs in this case.
+	if( skill <= 0.33f ) {
+		maxSuggestedLookDirs = 2;
+		return;
+	}
+
+	maxSuggestedLookDirs = MAX_SUGGESTED_LOOK_DIRS;
+	// Use the maximum possible number of suggested dirs for hard bots.
+	if( skill >= 0.66f ) {
+		return;
+	}
+
+	// Check whether the bot is carrier. Use the maximal possible number of look dirs in this case.
+	const edict_t *self = game.edicts + bot->EntNum();
+	if( ( ( self->s.effects & EF_CARRIER ) || self->s.modelindex2 ) || bot->ShouldRushHeadless() ) {
+		return;
+	}
+
+	// Grow quadratic starting from a weakest mid-skill bot
+	float skillFrac = ( skill - 0.33f ) / ( 0.66f - 0.33f );
+	Assert( skillFrac > 0.0f && skillFrac < 1.0f );
+	maxSuggestedLookDirs = (unsigned)( 2 + ( skillFrac * skillFrac ) * MAX_SUGGESTED_LOOK_DIRS );
+	maxSuggestedLookDirs = std::min( maxSuggestedLookDirs, (unsigned)MAX_SUGGESTED_LOOK_DIRS );
 }
 
 void BunnyStraighteningReachChainAction::SaveSuggestedLookDirs( Context *context ) {
@@ -52,19 +85,8 @@ void BunnyStraighteningReachChainAction::SaveSuggestedLookDirs( Context *context
 	AreaAndScore candidates[MAX_TESTED_REACH];
 	AreaAndScore *candidatesEnd = SelectCandidateAreas( context, candidates, (unsigned)lastValidReachIndex );
 
-	const auto numCandidates = (unsigned)( candidatesEnd - candidates );
-	if( numCandidates > 3 ) {
-		// Check whether a computation quota disallows testing too many directions.
-		// (we try to defer Bot::TryGet*ComputationsQuota()) call as far as possible.
-		// Set maxSuggestedLookDirs appropriately
-		if( !bot->TryGetExtraComputationQuota() ) {
-			maxSuggestedLookDirs = 3;
-		} else {
-			maxSuggestedLookDirs = ( 2 * MAX_SUGGESTED_LOOK_DIRS ) / 3;
-		}
-	}
-
 	// Limit candidates range
+	const auto numCandidates = (unsigned)( candidatesEnd - candidates );
 	candidatesEnd = candidates + std::min( numCandidates, maxSuggestedLookDirs );
 
 	SaveCandidateAreaDirs( context, candidates, candidatesEnd );

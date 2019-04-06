@@ -17,11 +17,7 @@ class BunnyStraighteningReachChainAction final : public BunnyTestingSavedLookDir
 public:
 	explicit BunnyStraighteningReachChainAction( BotMovementModule *module_ );
 
-	void BeforePlanning() override {
-		BunnyTestingSavedLookDirsAction::BeforePlanning();
-		// Reset to the action default value every frame
-		maxSuggestedLookDirs = 3;
-	}
+	void BeforePlanning() override;
 };
 
 #endif
