@@ -40,6 +40,49 @@ BotPlanningModule::BotPlanningModule( Bot *bot_ )
 	, itemsSelector( bot_ )
 	, roamingManager( bot_ ) {}
 
+void BotPlanningModule::RegisterBuiltinGoalsAndActions() {
+	RegisterBuiltinGoal( grabItemGoal );
+	RegisterBuiltinGoal( killEnemyGoal );
+	RegisterBuiltinGoal( runAwayGoal );
+	RegisterBuiltinGoal( reactToHazardGoal );
+	RegisterBuiltinGoal( reactToThreatGoal );
+	RegisterBuiltinGoal( reactToEnemyLostGoal );
+	RegisterBuiltinGoal( attackOutOfDespairGoal );
+	RegisterBuiltinGoal( roamGoal );
+
+	RegisterBuiltinAction( runToNavEntityAction );
+	RegisterBuiltinAction( pickupNavEntityAction );
+	RegisterBuiltinAction( waitForNavEntityAction );
+
+	RegisterBuiltinAction( killEnemyAction );
+	RegisterBuiltinAction( advanceToGoodPositionAction );
+	RegisterBuiltinAction( retreatToGoodPositionAction );
+	RegisterBuiltinAction( gotoAvailableGoodPositionAction );
+	RegisterBuiltinAction( attackFromCurrentPositionAction );
+	RegisterBuiltinAction( attackAdvancingToTargetAction );
+
+	RegisterBuiltinAction( fleeToSpotAction );
+	RegisterBuiltinAction( startGotoCoverAction );
+	RegisterBuiltinAction( takeCoverAction );
+
+	RegisterBuiltinAction( startGotoRunAwayTeleportAction );
+	RegisterBuiltinAction( doRunAwayViaTeleportAction );
+	RegisterBuiltinAction( startGotoRunAwayJumppadAction );
+	RegisterBuiltinAction( doRunAwayViaJumppadAction );
+	RegisterBuiltinAction( startGotoRunAwayElevatorAction );
+	RegisterBuiltinAction( doRunAwayViaElevatorAction );
+	RegisterBuiltinAction( stopRunningAwayAction );
+
+	RegisterBuiltinAction( dodgeToSpotAction );
+
+	RegisterBuiltinAction( turnToThreatOriginAction );
+
+	RegisterBuiltinAction( turnToLostEnemyAction );
+	RegisterBuiltinAction( startLostEnemyPursuitAction );
+	RegisterBuiltinAction( stopLostEnemyPursuitAction );
+}
+
+
 BotScriptGoal *BotPlanningModule::InstantiateScriptGoal( void *scriptGoalFactory,
 														 const char *name,
 														 unsigned updatePeriod ) {

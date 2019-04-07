@@ -71,8 +71,18 @@ class BotPlanningModule {
 	BotTacticalSpotsCache tacticalSpotsCache;
 	BotItemsSelector itemsSelector;
 	BotRoamingManager roamingManager;
+
+	void RegisterBuiltinGoal( BotGoal &goal ) {
+		planner.goals.push_back( &goal );
+	}
+
+	void RegisterBuiltinAction( BotAction &action ) {
+		planner.actions.push_back( &action );
+	}
 public:
-	BotPlanningModule( Bot *bot_ );
+	explicit BotPlanningModule( Bot *bot_ );
+
+	void RegisterBuiltinGoalsAndActions();
 
 	BotGoal *GetGoalByName( const char *name ) { return planner.GetGoalByName( name ); }
 	BotAction *GetActionByName( const char *name ) { return planner.GetActionByName( name ); }

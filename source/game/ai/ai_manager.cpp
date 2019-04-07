@@ -490,6 +490,10 @@ void AiManager::SetupBotGoalsAndActions( edict_t *ent ) {
 
 	constexpr const char *tag = "AiManager::SetupBotGoalsAndActions()";
 
+	// This explicit call helps to avoid initialization order issues
+	// when goals/actions and AI objects refer to each other.
+	bot->planningModule.RegisterBuiltinGoalsAndActions();
+
 	// Make sure all builtin goals and actions have been registered
 	bool wereErrors = false;
 	for( const auto *goal: bot->planningModule.Goals() ) {

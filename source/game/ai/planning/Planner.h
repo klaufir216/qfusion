@@ -13,8 +13,6 @@
 class AiGoal {
 	friend class Ai;
 	friend class AiPlanner;
-
-	static inline void Register( Ai *ai, AiGoal *goal );
 protected:
 	Ai *const self;
 	const char *name;
@@ -23,11 +21,8 @@ protected:
 	float weight { 0.0f };
 
 public:
-	// Don't pass self as a constructor argument (self->ai ptr might not been set yet)
 	AiGoal( Ai *self_, const char *name_, unsigned updatePeriod_ )
-		: self( self_ ), name( name_ ), updatePeriod( updatePeriod_ ) {
-		Register( self_, this );
-	}
+		: self( self_ ), name( name_ ), updatePeriod( updatePeriod_ ) {}
 
 	virtual ~AiGoal() = default;
 
@@ -140,10 +135,6 @@ struct PlannerNode : PoolItem {
 
 class AiAction {
 	friend class Ai;
-	friend class BasePlanner;
-
-	static inline void Register( Ai *ai, AiAction *action );
-
 protected:
 	Ai *self;
 	const char *name;
@@ -194,11 +185,8 @@ protected:
 
 	PlannerNodePtr NewNodeForRecord( AiActionRecord *record );
 public:
-	// Don't pass self as a constructor argument (self->ai ptr might not been set yet)
 	AiAction( Ai *self_, const char *name_ )
-		: self( self_ ), name( name_ ) {
-		Register( self_, this );
-	}
+		: self( self_ ), name( name_ ) {}
 
 	virtual ~AiAction() = default;
 
@@ -260,17 +248,6 @@ public:
 
 	void DeletePlan( AiActionRecord *head );
 };
-
-inline void AiGoal::Register( Ai *ai, AiGoal *goal ) {
-	assert( ai && ai->planner );
-	ai->planner->goals.push_back( goal );
-}
-
-inline void AiAction::Register( Ai *ai, AiAction *action ) {
-	assert( ai );
-	assert( ai->planner );
-	ai->planner->actions.push_back( action );
-}
 
 inline AiAction::PlannerNodePtr::~PlannerNodePtr() {
 	if( this->node ) {
