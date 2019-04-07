@@ -4,13 +4,17 @@
 
 Ai::Ai( edict_t *self_,
 		AiPlanner *planner_,
+		GoalsVector *plannerGoals_,
+		ActionsVector *plannerActions_,
 		AiAasRouteCache *routeCache_,
 		AiEntityPhysicsState *entityPhysicsState_,
 		int allowedAasTravelFlags_,
 		int preferredAasTravelFlags_,
 		float yawSpeed,
 		float pitchSpeed )
-	: self( self_ )
+	: plannerGoals( plannerGoals_ )
+	, plannerActions( plannerActions_ )
+	, self( self_ )
 	, planner( planner_ )
 	, routeCache( routeCache_ )
 	, aasWorld( AiAasWorld::Instance() )

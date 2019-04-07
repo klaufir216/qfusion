@@ -19,8 +19,8 @@ class BotPlanner : public AiPlanner {
 	Bot *const bot;
 	BotPlanningModule *const module;
 
-	StaticVector<BotScriptGoal, MAX_GOALS> scriptGoals;
-	StaticVector<BotScriptAction, MAX_ACTIONS> scriptActions;
+	StaticVector<BotScriptGoal, Ai::MAX_PLANNER_GOALS> scriptGoals;
+	StaticVector<BotScriptAction, Ai::MAX_PLANNER_ACTIONS> scriptActions;
 
 	BotGoal *GetGoalByName( const char *name );
 	BotAction *GetActionByName( const char *name );

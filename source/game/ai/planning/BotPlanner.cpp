@@ -9,7 +9,8 @@
 #include <stdarg.h>
 
 BotPlanner::BotPlanner( Bot *bot_, BotPlanningModule *module_ )
-	: AiPlanner( bot_ ), bot( bot_ ), module( module_ ), cachedWorldState( bot_ ) {}
+	: AiPlanner( bot_, &module_->goals, &module_->actions )
+	, bot( bot_ ), module( module_ ), cachedWorldState( bot_ ) {}
 
 const int *BotPlanner::Inventory() const {
 	return game.edicts[bot->EntNum()].r.client->ps.inventory;

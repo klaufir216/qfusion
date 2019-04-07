@@ -448,7 +448,7 @@ void AiManager::AddApplicableAction( const char *goalName, const char *actionNam
 		return;
 	}
 
-	if( goalProps->numApplicableActions == MAX_ACTIONS ) {
+	if( goalProps->numApplicableActions == Ai::MAX_PLANNER_ACTIONS ) {
 		G_Printf( S_COLOR_RED "%s: too many actions have already been registered\n", tag );
 		return;
 	}

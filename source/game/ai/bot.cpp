@@ -8,17 +8,20 @@
 #include <array>
 
 #ifndef _MSC_VER
-// Allow getting an address of not initialized yet field movementModule.movementState.entityPhysicsState.
-// Saving this address for further use is legal, the field is not going to be used right now.
+// Allow getting an address of not initialized yet fields.
+// Saving this address for further use is legal.
+// The field is not going to be used right now.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wuninitialized"
 #endif
 
 Bot::Bot( edict_t *self_, float skillLevel_ )
 	: Ai( self_
-		, &planningModule.planner
+		, &planningModule.planner   // Just saves an address of it
+		, &planningModule.goals     // Just saves an address of it
+		, &planningModule.actions   // Just saves an address of it
 		, AiAasRouteCache::NewInstance( &travelFlags[0] )
-		, &movementModule.movementState.entityPhysicsState
+		, &movementModule.movementState.entityPhysicsState  // Just saves an address of it
 		, PREFERRED_TRAVEL_FLAGS
 		, ALLOWED_TRAVEL_FLAGS
 		, skillLevel_ > 0.33f ? DEFAULT_YAW_SPEED * 1.5f : DEFAULT_YAW_SPEED

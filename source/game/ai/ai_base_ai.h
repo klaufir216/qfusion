@@ -238,6 +238,8 @@ public:
 };
 
 class AiPlanner;
+class AiAction;
+class AiGoal;
 
 class Ai : public AiFrameAwareUpdatable
 {
@@ -251,6 +253,18 @@ class Ai : public AiFrameAwareUpdatable
 	friend class AiActionRecord;
 	friend class AiGoal;
 
+public:
+	static constexpr unsigned MAX_PLANNER_GOALS = 12;
+	static constexpr unsigned MAX_PLANNER_ACTIONS = 32;
+
+	using GoalsVector = StaticVector<AiGoal *, MAX_PLANNER_GOALS>;
+	using ActionsVector = StaticVector<AiAction *, MAX_PLANNER_ACTIONS>;
+private:
+	// These references are supplied via a constructor
+	// and serve a purpose of breaking a cyclic dependency
+	// to supply valid references for RegisterGoal(), RegisterAction() methods.
+	GoalsVector *const plannerGoals;
+	ActionsVector *const plannerActions;
 protected:
 	edict_t *const self;
 	// Must be set in a subclass constructor. A subclass manages memory for its planner
@@ -336,14 +350,16 @@ public:
 	static constexpr float DEFAULT_YAW_SPEED = 330.0f;
 	static constexpr float DEFAULT_PITCH_SPEED = 170.0f;
 
-	Ai( edict_t *self_
-	  , AiPlanner *planner_
-	  , AiAasRouteCache *routeCache_
-	  , AiEntityPhysicsState *entityPhysicsState_
-	  , int preferredAasTravelFlags_
-	  , int allowedAasTravelFlags_
-	  , float yawSpeed = DEFAULT_YAW_SPEED
-	  , float pitchSpeed = DEFAULT_PITCH_SPEED );
+	Ai( edict_t *self_,
+		AiPlanner *planner_,
+		GoalsVector *plannerGoals_,
+		ActionsVector *plannerActions_,
+		AiAasRouteCache *routeCache_,
+		AiEntityPhysicsState *entityPhysicsState_,
+		int preferredAasTravelFlags_,
+		int allowedAasTravelFlags_,
+		float yawSpeed = DEFAULT_YAW_SPEED,
+		float pitchSpeed = DEFAULT_PITCH_SPEED );
 
 	inline bool IsGhosting() const { return G_ISGHOSTING( self ); }
 

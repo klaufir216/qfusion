@@ -6,7 +6,7 @@
 class BotPlanningModule;
 
 class BotGoal : public AiGoal {
-	StaticVector<AiAction *, AiPlanner::MAX_ACTIONS> extraApplicableActions;
+	StaticVector<AiAction *, Ai::MAX_PLANNER_ACTIONS> extraApplicableActions;
 public:
 	BotGoal( BotPlanningModule *module_, const char *name_, int debugColor_, unsigned updatePeriod_ );
 

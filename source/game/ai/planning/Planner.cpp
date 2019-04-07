@@ -137,12 +137,12 @@ bool AiPlanner::FindNewGoalAndPlan( const WorldState &currWorldState ) {
 	BeforePlanning();
 
 	// Update goals weights based for the current world state before sorting
-	for( AiGoal *goal: goals )
+	for( AiGoal *goal: *goals )
 		goal->UpdateWeight( currWorldState );
 
 	// Filter relevant goals
-	StaticVector<GoalRef, MAX_GOALS> relevantGoals;
-	for( AiGoal *goal: goals ) {
+	StaticVector<GoalRef, Ai::MAX_PLANNER_GOALS> relevantGoals;
+	for( AiGoal *goal: *goals ) {
 		if( goal->IsRelevant() ) {
 			relevantGoals.emplace_back( GoalRef( goal ) );
 		}
@@ -185,13 +185,13 @@ bool AiPlanner::UpdateGoalAndPlan( const WorldState &currWorldState ) {
 		return false;
 	}
 
-	for( AiGoal *goal: goals )
+	for( AiGoal *goal: *goals )
 		goal->UpdateWeight( currWorldState );
 
 	AiGoal *activeRelevantGoal = nullptr;
 	// Filter relevant goals and mark whether the active goal is relevant
-	StaticVector<GoalRef, MAX_GOALS> relevantGoals;
-	for( AiGoal *goal: goals ) {
+	StaticVector<GoalRef, Ai::MAX_PLANNER_GOALS> relevantGoals;
+	for( AiGoal *goal: *goals ) {
 		if( goal->IsRelevant() ) {
 			if( goal == activeGoal ) {
 				activeRelevantGoal = goal;

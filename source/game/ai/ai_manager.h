@@ -10,9 +10,6 @@ class Bot;
 
 class AiManager : public AiFrameAwareUpdatable
 {
-	static const unsigned MAX_ACTIONS = AiPlanner::MAX_ACTIONS;
-	static const unsigned MAX_GOALS = AiPlanner::MAX_GOALS;
-
 protected:
 	AiManager( const char *gametype, const char *mapname );
 
@@ -148,7 +145,7 @@ public:
 		void *factoryObject { nullptr };
 		unsigned updatePeriod { 0 };
 		// Can't use StaticVector due to its disabled copy/move ctors
-		const char *applicableActions[MAX_ACTIONS];
+		const char *applicableActions[Ai::MAX_PLANNER_ACTIONS];
 		unsigned numApplicableActions { 0 };
 
 		GoalProps() = default;
@@ -190,8 +187,8 @@ public:
 		}
 	};
 
-	StringValueMap<ActionProps, MAX_ACTIONS> registeredActions;
-	StringValueMap<GoalProps, MAX_GOALS> registeredGoals;
+	StringValueMap<ActionProps, Ai::MAX_PLANNER_ACTIONS> registeredActions;
+	StringValueMap<GoalProps, Ai::MAX_PLANNER_GOALS> registeredGoals;
 
 	void RegisterBuiltinGoal( const char *goalName );
 	void RegisterBuiltinAction( const char *actionName );

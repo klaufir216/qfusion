@@ -214,11 +214,6 @@ class AiPlanner : public AiFrameAwareUpdatable {
 	friend class AiGoal;
 	friend class AiAction;
 	friend class AiActionRecord;
-
-public:
-	static constexpr unsigned MAX_GOALS = 12;
-	static constexpr unsigned MAX_ACTIONS = 36;
-
 protected:
 	Ai *const ai;
 
@@ -226,13 +221,14 @@ protected:
 	AiGoal *activeGoal { nullptr };
 	int64_t nextActiveGoalUpdateAt { 0 };
 
-	StaticVector<AiGoal *, MAX_GOALS> goals;
-	StaticVector<AiAction *, MAX_ACTIONS> actions;
+	Ai::GoalsVector *const goals;
+	Ai::ActionsVector *const actions;
 
 	static constexpr unsigned MAX_PLANNER_NODES = 384;
 	Pool<PlannerNode, MAX_PLANNER_NODES> plannerNodesPool { "PlannerNodesPool" };
 
-	explicit AiPlanner( Ai *ai_ ): ai( ai_ ) {}
+	AiPlanner( Ai *ai_, Ai::GoalsVector *goals_, Ai::ActionsVector *actions_ )
+		: ai( ai_ ), goals( goals_ ), actions( actions_ ) {}
 
 	virtual void PrepareCurrWorldState( WorldState *worldState ) = 0;
 
@@ -262,14 +258,13 @@ public:
 };
 
 inline void AiGoal::Register( Ai *ai, AiGoal *goal ) {
-	assert( ai && ai->planner );
-	ai->planner->goals.push_back( goal );
+	assert( ai && ai->goals );
+	ai->plannerGoals->push_back( goal );
 }
 
 inline void AiAction::Register( Ai *ai, AiAction *action ) {
-	assert( ai );
-	assert( ai->planner );
-	ai->planner->actions.push_back( action );
+	assert( ai && ai->actions );
+	ai->plannerActions->push_back( action );
 }
 
 inline AiAction::PlannerNodePtr::~PlannerNodePtr() {

@@ -24,6 +24,17 @@ class BotPlanningModule {
 	friend class BotTacticalSpotsCache;
 	friend class WorldState;
 
+	/**
+	 * The actual storage for references of all goals (that are aggregated by this module as well).
+	 * @warning make sure this vector gets declared (and thus initialized) before all goal members.
+	 */
+	Ai::GoalsVector goals;
+	/**
+	 * The actual storage for references of all actions (that are aggregated by this module as well).
+	 * @warning make sure this vector gets declared (and thus initialized) before all action members.
+	 */
+	Ai::ActionsVector actions;
+
 	Bot *const bot;
 
 	BotPlanner planner;
@@ -72,7 +83,7 @@ class BotPlanningModule {
 	BotItemsSelector itemsSelector;
 	BotRoamingManager roamingManager;
 public:
-	BotPlanningModule( Bot *bot_ );
+	explicit BotPlanningModule( Bot *bot_ );
 
 	BotGoal *GetGoalByName( const char *name ) { return planner.GetGoalByName( name ); }
 	BotAction *GetActionByName( const char *name ) { return planner.GetActionByName( name ); }
@@ -117,11 +128,11 @@ public:
 	}
 
 	const ArrayRange<AiGoal *> Goals() const {
-		return ArrayRange<AiGoal *>( planner.goals.begin(), planner.goals.size() );
+		return ArrayRange<AiGoal *>( goals.begin(), goals.end() );
 	}
 
 	const ArrayRange<AiAction *> Actions() const {
-		return ArrayRange<AiAction *>( planner.actions.begin(), planner.actions.size() );
+		return ArrayRange<AiAction *>( actions.begin(), actions.end() );
 	}
 };
 
