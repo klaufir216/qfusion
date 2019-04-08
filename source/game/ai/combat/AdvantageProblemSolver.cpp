@@ -4,8 +4,11 @@
 
 int AdvantageProblemSolver::FindMany( vec3_t *spots, int maxSpots ) {
 	uint16_t insideSpotNum;
-	const SpotsQueryVector &spotsFromQuery = tacticalSpotsRegistry->FindSpotsInRadius( originParams, &insideSpotNum );
-	SpotsAndScoreVector &candidateSpots = SelectCandidateSpots( spotsFromQuery );
+	SpotsQueryVector &spotsFromQuery = tacticalSpotsRegistry->FindSpotsInRadius( originParams, &insideSpotNum );
+	// First filter retrieved spots using very cheap tables tests.
+	// Reachability tests turned out to be very expensive/non-scalable.
+	SpotsQueryVector &filteredByTablesSpots = FilterByVisTables( spotsFromQuery, insideSpotNum );
+	SpotsAndScoreVector &candidateSpots = SelectCandidateSpots( filteredByTablesSpots );
 	SpotsAndScoreVector &reachCheckedSpots = CheckSpotsReach( candidateSpots, insideSpotNum );
 	SpotsAndScoreVector &visCheckedSpots = CheckOriginVisibility( reachCheckedSpots, maxSpots );
 	SortByVisAndOtherFactors( visCheckedSpots );
@@ -70,50 +73,59 @@ SpotsAndScoreVector &AdvantageProblemSolver::SelectCandidateSpots( const SpotsQu
 	return result;
 }
 
-SpotsAndScoreVector &AdvantageProblemSolver::CheckOriginVisibility( SpotsAndScoreVector &reachCheckedSpots,
-																	int maxSpots ) {
-	assert( maxSpots >= 0 );
-
-	edict_t *passent = const_cast<edict_t*>( originParams.originEntity );
-	edict_t *keepVisibleEntity = const_cast<edict_t *>( problemParams.keepVisibleEntity );
-	Vec3 keepVisibleOrigin( problemParams.keepVisibleOrigin );
+TacticalSpotsRegistry::SpotsQueryVector &AdvantageProblemSolver::FilterByVisTables( SpotsQueryVector &spotsFromQuery,
+																					int16_t insideSpotNum ) {
 	int keepVisibleAreaNum = 0;
-	// If not only origin but an entity too is supplied
-	if( keepVisibleEntity ) {
-		// Its a good idea to add some offset from the ground
+	Vec3 keepVisibleOrigin( problemParams.keepVisibleOrigin );
+	if( const auto *keepVisibleEntity = problemParams.keepVisibleEntity ) {
 		keepVisibleOrigin.Z() += 0.66f * keepVisibleEntity->r.maxs[2];
 		if( const auto *ai = keepVisibleEntity->ai ) {
 			if( const auto *bot = ai->botRef ) {
-				int areaNums[] { 0, 0 };
+				int areaNums[2] { 0, 0 };
 				bot->EntityPhysicsState()->PrepareRoutingStartAreas( areaNums );
 				keepVisibleAreaNum = areaNums[0];
 			}
 		}
 	}
 
-	// Copy to locals for faster access
-	const edict_t *gameEdicts = game.edicts;
 	const auto *const spots = tacticalSpotsRegistry->spots;
-	const auto *aasWorld = AiAasWorld::Instance();
+	const auto *const aasWorld = AiAasWorld::Instance();
 	if( !keepVisibleAreaNum ) {
 		keepVisibleAreaNum = aasWorld->FindAreaNum( keepVisibleOrigin );
 	}
 
-	// Decompress an AAS areas vis row for the origin area
-	auto *originVisRow = aasWorld->DecompressAreaVis( originParams.originAreaNum, AasElementsMask::TmpAreasVisRow( 0 ) );
+	unsigned numKeptSpots = 0;
 	// Decompress an AAS areas vis row for the area of the "keep visible origin/entity"
-	auto *keepVisEntRow = aasWorld->DecompressAreaVis( keepVisibleAreaNum, AasElementsMask::TmpAreasVisRow( 1 ) );
+	auto *keepVisEntRow = aasWorld->DecompressAreaVis( keepVisibleAreaNum, AasElementsMask::TmpAreasVisRow( 0 ) );
+	// We can use mutual spots visibility table if an "inside spot num" spot encloses OriginParams
+	if( insideSpotNum >= 0 ) {
+		// Select a row of spot visible from "inside spot num"
+		const auto *spotsVisRow = tacticalSpotsRegistry->spotVisibilityTable + insideSpotNum;
+		for( auto spotNum: spotsFromQuery ) {
+			// If the spot is not visible from the spot that encloses OriginParams
+			if( !spotsVisRow[spotNum] ) {
+				continue;
+			}
+			// This will be explained below for the generic path branch
+			if( !keepVisEntRow[spots[spotNum].aasAreaNum] ) {
+				continue;
+			}
+			// Store spot num in-place
+			spotsFromQuery[numKeptSpots++] = spotNum;
+		}
+		spotsFromQuery.truncate( numKeptSpots );
+		return spotsFromQuery;
+	}
 
-	SpotsAndScoreVector &result = tacticalSpotsRegistry->temporariesAllocator.GetNextCleanSpotsAndScoreVector();
-
-	trace_t trace;
-	for( const SpotAndScore &spotAndScore : reachCheckedSpots ) {
-		const auto &spot = spots[spotAndScore.spotNum];
+	// Decompress an AAS areas vis row for the origin area
+	auto *originVisRow = aasWorld->DecompressAreaVis( originParams.originAreaNum, AasElementsMask::TmpAreasVisRow( 1 ) );
+	for( auto spotNum: spotsFromQuery ) {
+		const auto spotAreaNum = spots[spotNum].aasAreaNum;
 		// Skip area if the vis row value for the spot is false.
 		// This does not guarantee it cannot be visible from the origin area
 		// as the vis table computations are coarse and yield some false negatives.
 		// However it substantially reduces an inclusive cost of calling this routine.
-		if( !originVisRow[spot.aasAreaNum] ) {
+		if( !originVisRow[spotAreaNum] ) {
 			continue;
 		}
 
@@ -121,14 +133,41 @@ SpotsAndScoreVector &AdvantageProblemSolver::CheckOriginVisibility( SpotsAndScor
 		// Generally speaking the visibility relation should not be symmetric
 		// but the AAS area table vis computations are made only against a solid collision world.
 		// Consider the entity non-visible from spot if the spot is not considered visible from the entity.
-		if( !keepVisEntRow[spot.aasAreaNum] ) {
+		if( !keepVisEntRow[spotAreaNum] ) {
 			continue;
 		}
 
+		// Store spot num in-place
+		spotsFromQuery[numKeptSpots++] = spotNum;
+	}
+
+	spotsFromQuery.truncate( numKeptSpots );
+	return spotsFromQuery;
+}
+
+SpotsAndScoreVector &AdvantageProblemSolver::CheckOriginVisibility( SpotsAndScoreVector &reachCheckedSpots,
+																	int maxSpots ) {
+	assert( maxSpots >= 0 );
+
+	edict_t *passent = const_cast<edict_t*>( originParams.originEntity );
+	edict_t *keepVisibleEntity = const_cast<edict_t *>( problemParams.keepVisibleEntity );
+	Vec3 keepVisibleOrigin( problemParams.keepVisibleOrigin );
+	if( keepVisibleEntity ) {
+		// Its a good idea to add some offset from the ground
+		keepVisibleOrigin.Z() += 0.66f * keepVisibleEntity->r.maxs[2];
+	}
+
+	const edict_t *gameEdicts = game.edicts;
+	const auto *const spots = tacticalSpotsRegistry->spots;
+	const float spotZOffset = -playerbox_stand_mins[2] + playerbox_stand_viewheight;
+	SpotsAndScoreVector &result = tacticalSpotsRegistry->temporariesAllocator.GetNextCleanSpotsAndScoreVector();
+
+	trace_t trace;
+	for( const SpotAndScore &spotAndScore : reachCheckedSpots ) {
 		//.Spot origins are dropped to floor (only few units above)
 		// Check whether we can hit standing on this spot (having the gun at viewheight)
 		Vec3 from( spots[spotAndScore.spotNum].origin );
-		from.Z() += -playerbox_stand_mins[2] + playerbox_stand_viewheight;
+		from.Z() += spotZOffset;
 		G_Trace( &trace, from.Data(), nullptr, nullptr, keepVisibleOrigin.Data(), passent, MASK_AISOLID );
 		if( trace.fraction != 1.0f && gameEdicts + trace.ent != keepVisibleEntity ) {
 			continue;

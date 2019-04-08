@@ -48,6 +48,8 @@ private:
 
 	void SortByVisAndOtherFactors( SpotsAndScoreVector &spots );
 
+	SpotsQueryVector &FilterByVisTables( SpotsQueryVector &spotsFromQuery, int16_t insideSpotNum );
+
 	SpotsAndScoreVector &SelectCandidateSpots( const SpotsQueryVector &spotsFromQuery ) override;
 public:
 	AdvantageProblemSolver( const OriginParams &originParams_, const ProblemParams &problemParams_ )
