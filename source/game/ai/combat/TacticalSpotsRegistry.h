@@ -129,12 +129,15 @@ private:
 	// ...
 	// 255 if spot origins and bounds are completely visible for each other
 	uint8_t *spotVisibilityTable { nullptr };
-	// For i-th spot element # i * numSpots + j contains AAS travel time to j-th spot.
-	// If the value is zero, j-th spot is not reachable from i-th one (we conform to AAS time encoding).
-	// Non-zero value is a travel time in seconds^-2 (we conform to AAS time encoding).
-	// Non-zero does not guarantee the spot is reachable for some picked bot
-	// (these values are calculated using shared AI route cache and bots have individual one for blocked paths handling).
-	uint16_t *spotTravelTimeTable { nullptr };
+	// Contains a 2-dimensional array of travel time pairs ("from spot to area", "from area to spot").
+	// An every cell has two values and the total number of short elements is 2 * numAreas * numSpots.
+	// An outer index corresponds to an area number.
+	// This is for CPU cache utilization efficiency (usually many spots are tested against the same area).
+	// Travel times are computed using a shared AAS route cache and Bot::ALLOWED_TRAVEL_FLAGS.
+	// Thus a path might not exist for a particular bot as individual route caches usually have additional restrictions.
+	// Regardless of that values of this table are very useful for cutting off
+	// non-feasible spots/areas before making expensive actual routing calls.
+	uint16_t *spotsAndAreasTravelTimeTable { nullptr };
 
 	unsigned numSpots { 0 };
 
@@ -274,6 +277,18 @@ public:
 		VectorSet( maxs, +2, +2, +2 );
 		VectorAdd( mins, playerbox_stand_mins, mins );
 		VectorAdd( maxs, playerbox_stand_maxs, maxs );
+	}
+
+	int TravelTimeFromAreaToSpot( int areaNum, int spotNum ) const {
+		assert( (unsigned)areaNum < (unsigned)AiAasWorld::Instance()->NumAreas() );
+		assert( (unsigned)spotNum < (unsigned)numSpots );
+		return spotsAndAreasTravelTimeTable[2 * ( areaNum * numSpots + spotNum ) + 1];
+	}
+
+	int TravelTimeFromSpotToArea( int spotNum, int areaNum ) const {
+		assert( (unsigned)areaNum < (unsigned)AiAasWorld::Instance()->NumAreas() );
+		assert( (unsigned)spotNum < (unsigned)numSpots );
+		return spotsAndAreasTravelTimeTable[2 * ( areaNum * numSpots + spotNum ) + 0];
 	}
 };
 

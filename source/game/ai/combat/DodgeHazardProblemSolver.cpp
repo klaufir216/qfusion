@@ -5,7 +5,7 @@ int DodgeHazardProblemSolver::FindMany( vec3_t *spotOrigins, int maxSpots ) {
 	uint16_t insideSpotNum;
 	const SpotsQueryVector &spotsFromQuery = tacticalSpotsRegistry->FindSpotsInRadius( originParams, &insideSpotNum );
 	SpotsAndScoreVector &candidateSpots =  SelectCandidateSpots( spotsFromQuery );
-	SpotsAndScoreVector &reachCheckedSpots = CheckSpotsReach( candidateSpots, insideSpotNum );
+	SpotsAndScoreVector &reachCheckedSpots = CheckSpotsReach( candidateSpots );
 	TryModifyingScoreByVelocityConformance( reachCheckedSpots );
 	return CleanupAndCopyResults( reachCheckedSpots, spotOrigins, maxSpots );
 }

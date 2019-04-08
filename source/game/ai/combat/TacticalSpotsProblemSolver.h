@@ -29,7 +29,7 @@ public:
 		float originDistanceInfluence { 0.9f };
 		float travelTimeInfluence { 0.9f };
 		float heightOverOriginInfluence { 0.9f };
-		int maxFeasibleTravelTimeMillis { 5000 };
+		int maxFeasibleTravelTimeMillis { 30000 };
 		float spotProximityThreshold { 64.0f };
 		bool checkToAndBackReach { false };
 
@@ -85,17 +85,15 @@ protected:
 
 	virtual SpotsAndScoreVector &SelectCandidateSpots( const SpotsQueryVector &spotsFromQuery );
 
-	virtual SpotsAndScoreVector &CheckSpotsReachFromOrigin( SpotsAndScoreVector &candidateSpots,
-															uint16_t insideSpotNum );
+	virtual SpotsAndScoreVector &CheckSpotsReachFromOrigin( SpotsAndScoreVector &candidateSpots );
 
-	virtual SpotsAndScoreVector &CheckSpotsReachFromOriginAndBack( SpotsAndScoreVector &candidateSpots,
-																   uint16_t insideSpotNum );
+	virtual SpotsAndScoreVector &CheckSpotsReachFromOriginAndBack( SpotsAndScoreVector &candidateSpots );
 
-	SpotsAndScoreVector &CheckSpotsReach( SpotsAndScoreVector &candidateSpots, uint16_t insideSpotNum ) {
+	SpotsAndScoreVector &CheckSpotsReach( SpotsAndScoreVector &candidateSpots ) {
 		if( problemParams.checkToAndBackReach ) {
-			return CheckSpotsReachFromOriginAndBack( candidateSpots, insideSpotNum );
+			return CheckSpotsReachFromOriginAndBack( candidateSpots );
 		}
-		return CheckSpotsReachFromOrigin( candidateSpots, insideSpotNum );
+		return CheckSpotsReachFromOrigin( candidateSpots );
 	}
 
 	virtual SpotsAndScoreVector &CheckEnemiesInfluence( SpotsAndScoreVector &candidateSpots );

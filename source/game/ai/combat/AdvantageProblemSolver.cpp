@@ -9,7 +9,7 @@ int AdvantageProblemSolver::FindMany( vec3_t *spots, int maxSpots ) {
 	// Reachability tests turned out to be very expensive/non-scalable.
 	SpotsQueryVector &filteredByTablesSpots = FilterByVisTables( spotsFromQuery, insideSpotNum );
 	SpotsAndScoreVector &candidateSpots = SelectCandidateSpots( filteredByTablesSpots );
-	SpotsAndScoreVector &reachCheckedSpots = CheckSpotsReach( candidateSpots, insideSpotNum );
+	SpotsAndScoreVector &reachCheckedSpots = CheckSpotsReach( candidateSpots );
 	SpotsAndScoreVector &enemyCheckedSpots = CheckEnemiesInfluence( reachCheckedSpots );
 	SpotsAndScoreVector &visCheckedSpots = CheckOriginVisibility( enemyCheckedSpots, maxSpots );
 	SortByVisAndOtherFactors( visCheckedSpots );

@@ -39,11 +39,12 @@ SpotsAndScoreVector &TacticalSpotsProblemSolver::SelectCandidateSpots( const Spo
 	return result;
 }
 
-SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckSpotsReachFromOrigin( SpotsAndScoreVector &candidateSpots,
-																			uint16_t insideSpotNum ) {
-	const auto *routeCache = originParams.routeCache;
+SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckSpotsReachFromOrigin( SpotsAndScoreVector &candidateSpots ) {
+	const auto *const routeCache = originParams.routeCache;
+	const float *const origin = originParams.origin;
+	const auto *const spots = tacticalSpotsRegistry->spots;
+
 	const int originAreaNum = originParams.originAreaNum;
-	const float *origin = originParams.origin;
 	const float searchRadius = originParams.searchRadius;
 	// AAS uses travel time in centiseconds
 	const int maxFeasibleTravelTimeCentis = problemParams.maxFeasibleTravelTimeMillis / 10;
@@ -51,52 +52,33 @@ SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckSpotsReachFromOrigin( Spot
 	const float distanceInfluence = problemParams.originDistanceInfluence;
 	const float travelTimeInfluence = problemParams.travelTimeInfluence;
 	const auto travelFlags = Bot::ALLOWED_TRAVEL_FLAGS;
-	const auto *const spots = tacticalSpotsRegistry->spots;
 
 	SpotsAndScoreVector &result = tacticalSpotsRegistry->temporariesAllocator.GetNextCleanSpotsAndScoreVector();
 
-	// Do not more than result.capacity() iterations.
-	// Some feasible areas in candidateAreas tai that pass test may be skipped,
-	// but this is intended to reduce performance drops (do not more than result.capacity() pathfinder calls).
-	if( insideSpotNum < MAX_SPOTS ) {
-		const auto *travelTimeTable = tacticalSpotsRegistry->spotTravelTimeTable;
-		const auto tableRowOffset = insideSpotNum * this->tacticalSpotsRegistry->numSpots;
-		for( const SpotAndScore &spotAndScore: candidateSpots ) {
-			const TacticalSpot &spot = spots[spotAndScore.spotNum];
-			// If zero, the spotNum spot is not reachable from insideSpotNum
-			int tableTravelTime = travelTimeTable[tableRowOffset + spotAndScore.spotNum];
-			if( !tableTravelTime || tableTravelTime > maxFeasibleTravelTimeCentis ) {
-				continue;
-			}
+	// The outer index of the table corresponds to an area to aid cache-friendly iteration in these checks
+	for( const SpotAndScore &spotAndScore: candidateSpots ) {
+		const TacticalSpot &spot = spots[spotAndScore.spotNum];
+		// If zero the spot should be considered a-priori non-reachable from the origin area.
+		// The same applies to the upper travel time bounds
 
-			// Get an actual travel time (non-zero table value does not guarantee reachability)
-			int travelTime = routeCache->TravelTimeToGoalArea( originAreaNum, spot.aasAreaNum, travelFlags );
-			if( !travelTime || travelTime > maxFeasibleTravelTimeCentis ) {
-				continue;
-			}
-
-			float travelTimeFactor = 1.0f - ComputeTravelTimeFactor( travelTime, maxFeasibleTravelTimeCentis );
-			float distanceFactor = ComputeDistanceFactor( spot.origin, origin, weightFalloffDistanceRatio, searchRadius );
-			float newScore = spotAndScore.score;
-			newScore = ApplyFactor( newScore, distanceFactor, distanceInfluence );
-			newScore = ApplyFactor( newScore, travelTimeFactor, travelTimeInfluence );
-			result.push_back( SpotAndScore( spotAndScore.spotNum, newScore ) );
+		// Area-to-spot time is the first element in the pair
+		const int tableTravelTime = tacticalSpotsRegistry->TravelTimeFromAreaToSpot( originAreaNum, spotAndScore.spotNum );
+		if( !tableTravelTime || tableTravelTime > maxFeasibleTravelTimeCentis ) {
+			continue;
 		}
-	} else {
-		for( const SpotAndScore &spotAndScore: candidateSpots ) {
-			const TacticalSpot &spot = spots[spotAndScore.spotNum];
-			int travelTime = routeCache->TravelTimeToGoalArea( originAreaNum, spot.aasAreaNum, travelFlags );
-			if( !travelTime || travelTime > maxFeasibleTravelTimeCentis ) {
-				continue;
-			}
 
-			float travelTimeFactor = 1.0f - ComputeTravelTimeFactor( travelTime, maxFeasibleTravelTimeCentis );
-			float distanceFactor = ComputeDistanceFactor( spot.origin, origin, weightFalloffDistanceRatio, searchRadius );
-			float newScore = spotAndScore.score;
-			newScore = ApplyFactor( newScore, distanceFactor, distanceInfluence );
-			newScore = ApplyFactor( newScore, travelTimeFactor, travelTimeInfluence );
-			result.push_back( SpotAndScore( spotAndScore.spotNum, newScore ) );
+		// Get an actual travel time using the route cache that is very likely has additional restrictions
+		const int travelTime = routeCache->TravelTimeToGoalArea( originAreaNum, spot.aasAreaNum, travelFlags );
+		if( !travelTime || travelTime > maxFeasibleTravelTimeCentis ) {
+			continue;
 		}
+
+		const float travelTimeFactor = 1.0f - ComputeTravelTimeFactor( travelTime, maxFeasibleTravelTimeCentis );
+		const float distanceFactor = ComputeDistanceFactor( spot.origin, origin, weightFalloffDistanceRatio, searchRadius );
+		float newScore = spotAndScore.score;
+		newScore = ApplyFactor( newScore, distanceFactor, distanceInfluence );
+		newScore = ApplyFactor( newScore, travelTimeFactor, travelTimeInfluence );
+		result.push_back( SpotAndScore( spotAndScore.spotNum, newScore ) );
 	}
 
 	// Sort result so best score areas are first
@@ -104,11 +86,12 @@ SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckSpotsReachFromOrigin( Spot
 	return result;
 }
 
-SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckSpotsReachFromOriginAndBack( SpotsAndScoreVector &candidateSpots,
-																				   uint16_t insideSpotNum ) {
-	const auto *routeCache = originParams.routeCache;
+SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckSpotsReachFromOriginAndBack( SpotsAndScoreVector &candidateSpots ) {
+	const auto *const routeCache = originParams.routeCache;
+	const float *const origin = originParams.origin;
+	const auto *const spots = tacticalSpotsRegistry->spots;
+
 	const int originAreaNum = originParams.originAreaNum;
-	const float *origin = originParams.origin;
 	const float searchRadius = originParams.searchRadius;
 	// AAS uses time in centiseconds
 	const int maxFeasibleTravelTimeCentis = problemParams.maxFeasibleTravelTimeMillis / 10;
@@ -116,71 +99,43 @@ SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckSpotsReachFromOriginAndBac
 	const float distanceInfluence = problemParams.originDistanceInfluence;
 	const float travelTimeInfluence = problemParams.travelTimeInfluence;
 	const auto travelFlags = Bot::ALLOWED_TRAVEL_FLAGS;
-	const auto *const spots = tacticalSpotsRegistry->spots;
 
 	SpotsAndScoreVector &result = tacticalSpotsRegistry->temporariesAllocator.GetNextCleanSpotsAndScoreVector();
-
-	// Do not more than result.capacity() iterations.
-	// Some feasible areas in candidateAreas tai that pass test may be skipped,
-	// but it is intended to reduce performance drops (do not more than 2 * result.capacity() pathfinder calls).
-	if( insideSpotNum < MAX_SPOTS ) {
-		const auto *travelTimeTable = tacticalSpotsRegistry->spotTravelTimeTable;
-		const auto numSpots_ = tacticalSpotsRegistry->numSpots;
-		for( const SpotAndScore &spotAndScore : candidateSpots ) {
-			const TacticalSpot &spot = spots[spotAndScore.spotNum];
-
-			// If the table element i * numSpots_ + j is zero, j-th spot is not reachable from i-th one.
-			int tableToTravelTime = travelTimeTable[insideSpotNum * numSpots_ + spotAndScore.spotNum];
-			if( !tableToTravelTime ) {
-				continue;
-			}
-			int tableBackTravelTime = travelTimeTable[spotAndScore.spotNum * numSpots_ + insideSpotNum];
-			if( !tableBackTravelTime ) {
-				continue;
-			}
-			if( tableToTravelTime + tableBackTravelTime > maxFeasibleTravelTimeCentis ) {
-				continue;
-			}
-
-			// Get an actual travel time (non-zero table values do not guarantee reachability)
-			int toTravelTime = routeCache->TravelTimeToGoalArea( originAreaNum, spot.aasAreaNum, travelFlags );
-			// If `to` travel time is apriori greater than maximum allowed one (and thus the sum would be), reject early.
-			if( !toTravelTime || toTravelTime > maxFeasibleTravelTimeCentis ) {
-				continue;
-			}
-			int backTimeTravelTime = routeCache->TravelTimeToGoalArea( spot.aasAreaNum, originAreaNum, travelFlags );
-			if( !backTimeTravelTime || toTravelTime + backTimeTravelTime > maxFeasibleTravelTimeCentis ) {
-				continue;
-			}
-
-			int totalTravelTimeCentis = toTravelTime + backTimeTravelTime;
-			float travelTimeFactor = ComputeTravelTimeFactor( totalTravelTimeCentis, maxFeasibleTravelTimeCentis );
-			float distanceFactor = ComputeDistanceFactor( spot.origin, origin, weightFalloffDistanceRatio, searchRadius );
-			float newScore = spotAndScore.score;
-			newScore = ApplyFactor( newScore, distanceFactor, distanceInfluence );
-			newScore = ApplyFactor( newScore, travelTimeFactor, travelTimeInfluence );
-			result.push_back( SpotAndScore( spotAndScore.spotNum, newScore ) );
+	// The outer index of the table corresponds to an area to aid cache-friendly iteration in these checks
+	for( const SpotAndScore &spotAndScore : candidateSpots ) {
+		const auto spotNum = spotAndScore.spotNum;
+		const TacticalSpot &spot = spots[spotNum];
+		const int tableToTravelTime = tacticalSpotsRegistry->TravelTimeFromAreaToSpot( originAreaNum, spotNum );
+		if( !tableToTravelTime ) {
+			continue;
 		}
-	} else {
-		for( const SpotAndScore &spotAndScore : candidateSpots ) {
-			const TacticalSpot &spot = spots[spotAndScore.spotNum];
-			int toSpotTime = routeCache->TravelTimeToGoalArea( originAreaNum, spot.aasAreaNum, Bot::ALLOWED_TRAVEL_FLAGS );
-			if( !toSpotTime ) {
-				continue;
-			}
-			int toEntityTime = routeCache->TravelTimeToGoalArea( spot.aasAreaNum, originAreaNum, Bot::ALLOWED_TRAVEL_FLAGS );
-			if( !toEntityTime ) {
-				continue;
-			}
-
-			int totalTravelTimeCentis = 10 * ( toSpotTime + toEntityTime );
-			float travelTimeFactor = ComputeTravelTimeFactor( totalTravelTimeCentis, maxFeasibleTravelTimeCentis );
-			float distanceFactor = ComputeDistanceFactor( spot.origin, origin, weightFalloffDistanceRatio, searchRadius );
-			float newScore = spotAndScore.score;
-			newScore = ApplyFactor( newScore, distanceFactor, distanceInfluence );
-			newScore = ApplyFactor( newScore, travelTimeFactor, travelTimeInfluence );
-			result.push_back( SpotAndScore( spotAndScore.spotNum, newScore ) );
+		const int tableBackTravelTime = tacticalSpotsRegistry->TravelTimeFromSpotToArea( spotNum, originAreaNum );
+		if( !tableBackTravelTime ) {
+			continue;
 		}
+		// A round trip time can't be 2x larger
+		if( tableToTravelTime + tableBackTravelTime > 2 * maxFeasibleTravelTimeCentis ) {
+			continue;
+		}
+
+		// Get an actual travel time (non-zero table values do not guarantee reachability)
+		const int toTravelTime = routeCache->TravelTimeToGoalArea( originAreaNum, spot.aasAreaNum, travelFlags );
+		// If `to` travel time is apriori greater than maximum allowed one (and thus the sum would be), reject early.
+		if( !toTravelTime || toTravelTime > maxFeasibleTravelTimeCentis ) {
+			continue;
+		}
+		const int backTimeTravelTime = routeCache->TravelTimeToGoalArea( spot.aasAreaNum, originAreaNum, travelFlags );
+		if( !backTimeTravelTime || toTravelTime + backTimeTravelTime > 2 * maxFeasibleTravelTimeCentis ) {
+			continue;
+		}
+
+		const int totalTravelTimeCentis = toTravelTime + backTimeTravelTime;
+		const float travelTimeFactor = ComputeTravelTimeFactor( totalTravelTimeCentis, maxFeasibleTravelTimeCentis );
+		const float distanceFactor = ComputeDistanceFactor( spot.origin, origin, weightFalloffDistanceRatio, searchRadius );
+		float newScore = spotAndScore.score;
+		newScore = ApplyFactor( newScore, distanceFactor, distanceInfluence );
+		newScore = ApplyFactor( newScore, travelTimeFactor, travelTimeInfluence );
+		result.push_back( SpotAndScore( spotAndScore.spotNum, newScore ) );
 	}
 
 	// Sort result so best score areas are first

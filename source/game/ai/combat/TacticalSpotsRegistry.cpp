@@ -37,7 +37,7 @@ class TacticalSpotsBuilder {
 	int spotsCapacity { 0 };
 
 	uint8_t *spotVisibilityTable { nullptr };
-	uint16_t *spotTravelTimeTable { nullptr };
+	uint16_t *spotsAndAreasTravelTimeTable { nullptr };
 
 	TacticalSpotsRegistry::SpotsGridBuilder gridBuilder;
 
@@ -75,7 +75,7 @@ class TacticalSpotsBuilder {
 
 	void PickTacticalSpots();
 	void ComputeMutualSpotsVisibility();
-	void ComputeMutualSpotsReachability();
+	void ComputeTravelTimeTable();
 public:
 	explicit TacticalSpotsBuilder( TacticalSpotsRegistry *registry ): gridBuilder( registry ) {}
 
@@ -138,9 +138,11 @@ bool TacticalSpotsRegistry::TryLoadPrecomputedData( const char *mapName ) {
 		return false;
 	}
 
-	spotTravelTimeTable = (uint16_t *)data;
-	if( dataLength / sizeof( uint16_t ) != numSpots * numSpots ) {
-		G_Printf( S_COLOR_RED "%s: Travel time table size does not match the number of spots\n", function );
+	const int numAasAreas = AiAasWorld::Instance()->NumAreas();
+
+	spotsAndAreasTravelTimeTable = (uint16_t *)data;
+	if( ( dataLength / sizeof( uint16_t ) ) != 2 * numSpots * numAasAreas ) {
+		G_Printf( S_COLOR_RED "%s: Travel time table size does not match the number of spots and areas\n", function );
 		return false;
 	}
 
@@ -156,7 +158,6 @@ bool TacticalSpotsRegistry::TryLoadPrecomputedData( const char *mapName ) {
 	}
 
 	// Byte swap and validate tactical spots
-	const int numAasAreas = AiAasWorld::Instance()->NumAreas();
 	for( unsigned i = 0; i < numSpots; ++i ) {
 		auto &spot = spots[i];
 		spot.aasAreaNum = LittleLong( spot.aasAreaNum );
@@ -173,8 +174,8 @@ bool TacticalSpotsRegistry::TryLoadPrecomputedData( const char *mapName ) {
 	}
 
 	// Byte swap and travel times
-	for( unsigned i = 0; i < numSpots; ++i ) {
-		spotTravelTimeTable[i] = LittleShort( spotTravelTimeTable[i] );
+	for( unsigned i = 0; i < numSpots * numAasAreas; ++i ) {
+		spotsAndAreasTravelTimeTable[i] = LittleShort( spotsAndAreasTravelTimeTable[i] );
 	}
 
 	// Spot visibility does not need neither byte swap nor validation being just an unsigned byte
@@ -277,19 +278,22 @@ void TacticalSpotsRegistry::SavePrecomputedData( const char *mapName ) {
 	G_LevelFree( spots );
 	spots = nullptr;
 
-	// Byte swap travel times
-	static_assert( sizeof( *spotTravelTimeTable ) == 2, "LittleShort() is not applicable" );
-	for( unsigned i = 0, end = numSpots * numSpots; i < end; ++i )
-		spotTravelTimeTable[i] = LittleShort( spotTravelTimeTable[i] );
+	const int numAreas = AiAasWorld::Instance()->NumAreas();
 
-	dataLength = numSpots * numSpots * sizeof( *spotTravelTimeTable );
-	if( !writer.WriteLengthAndData( (const uint8_t *)spotTravelTimeTable, dataLength ) ) {
+	// Byte swap travel times
+	static_assert( sizeof( *spotsAndAreasTravelTimeTable ) == 2, "LittleShort() is not applicable" );
+	for( unsigned i = 0, end = 2 * numSpots * numAreas; i < end; ++i ) {
+		spotsAndAreasTravelTimeTable[i] = LittleShort( spotsAndAreasTravelTimeTable[i] );
+	}
+
+	dataLength = 2 * numSpots * numAreas * sizeof( *spotsAndAreasTravelTimeTable );
+	if( !writer.WriteLengthAndData( (const uint8_t *)spotsAndAreasTravelTimeTable, dataLength ) ) {
 		return;
 	}
 
 	// Prevent using byte-swapped travel times table
-	G_LevelFree( spotTravelTimeTable );
-	spotTravelTimeTable = nullptr;
+	G_LevelFree( spotsAndAreasTravelTimeTable );
+	spotsAndAreasTravelTimeTable = nullptr;
 
 	static_assert( sizeof( *spotVisibilityTable ) == 1, "Byte swapping is required" );
 	dataLength = numSpots * numSpots * sizeof( *spotVisibilityTable );
@@ -365,8 +369,8 @@ TacticalSpotsRegistry::~TacticalSpotsRegistry() {
 	if( spotVisibilityTable ) {
 		G_LevelFree( spotVisibilityTable );
 	}
-	if( spotTravelTimeTable ) {
-		G_LevelFree( spotTravelTimeTable );
+	if( spotsAndAreasTravelTimeTable ) {
+		G_LevelFree( spotsAndAreasTravelTimeTable );
 	}
 }
 
@@ -445,32 +449,35 @@ void TacticalSpotsBuilder::ComputeMutualSpotsVisibility() {
 	}
 }
 
-void TacticalSpotsBuilder::ComputeMutualSpotsReachability() {
-	G_Printf( "Computing mutual tactical spots reachability (it might take a while)...\n" );
+void TacticalSpotsBuilder::ComputeTravelTimeTable() {
+	G_Printf( "Computing mutual travel time between spots and areas (it might take a while)...\n" );
 
-	unsigned uNumSpots = (unsigned)numSpots;
-	spotTravelTimeTable = (unsigned short *)G_LevelMalloc( sizeof( unsigned short ) * uNumSpots * uNumSpots );
-	const int flags = Bot::ALLOWED_TRAVEL_FLAGS;
-	AiAasRouteCache *routeCache = AiAasRouteCache::Shared();
-	// Note: spots reachabilities are not reversible
-	// (for spots two A and B reachabilies A->B and B->A might differ, including being invalid, non-existent)
-	// Thus we have to find a reachability for each possible pair of spots
-	for( unsigned i = 0; i < uNumSpots; ++i ) {
-		const int currAreaNum = spots[i].aasAreaNum;
-		for( unsigned j = 0; j < i; ++j ) {
-			const int testedAreaNum = spots[j].aasAreaNum;
-			const int travelTime = routeCache->TravelTimeToGoalArea( currAreaNum, testedAreaNum, flags );
-			// AAS uses short for travel time computation. If one changes it, this assertion might be triggered.
-			assert( travelTime <= std::numeric_limits<unsigned short>::max() );
-			spotTravelTimeTable[i * numSpots + j] = (unsigned short)travelTime;
+	const auto *const aasWorld = AiAasWorld::Instance();
+	const auto *const aasAreaSettings = aasWorld->AreaSettings();
+	const auto *const routeCache = AiAasRouteCache::Shared();
+	const int numAreas = aasWorld->NumAreas();
+	const int travelFlags = Bot::ALLOWED_TRAVEL_FLAGS;
+	constexpr int maxVal = std::numeric_limits<uint16_t>::max();
+	constexpr auto badAreaFlags = AREA_DISABLED;
+	constexpr auto badAreaContents = AREACONTENTS_LAVA | AREACONTENTS_SLIME | AREACONTENTS_DONOTENTER;
+
+	spotsAndAreasTravelTimeTable = (uint16_t *)G_LevelMalloc( 2 *  sizeof( uint16_t ) * numSpots * numAreas );
+
+	int rowOffset = 0;
+	for( int areaNum = 0; areaNum < numAreas; ++areaNum ) {
+		// Filter out bad areas (this covers the dummy zero area too)
+		const auto &areaSettings = aasAreaSettings[areaNum];
+		if( ( areaSettings.areaflags & badAreaFlags ) || ( areaSettings.contents & badAreaContents ) ) {
+			std::fill_n( spotsAndAreasTravelTimeTable + rowOffset, 2 * numSpots, 0 );
+			rowOffset += 2 * numSpots;
+			continue;
 		}
-		// Set the lowest feasible travel time value for traveling from the curr spot to the curr spot itself.
-		spotTravelTimeTable[i * numSpots + i] = 1;
-		for( unsigned j = i + 1; j < uNumSpots; ++j ) {
-			const int testedAreaNum = spots[j].aasAreaNum;
-			const int travelTime = routeCache->TravelTimeToGoalArea( currAreaNum, testedAreaNum, flags );
-			assert( travelTime <= std::numeric_limits<unsigned short>::max() );
-			spotTravelTimeTable[i * numSpots + j] = (unsigned short)travelTime;
+		for( int spotNum = 0; spotNum < numSpots; ++spotNum ) {
+			const int spotAreaNum = spots[spotNum].aasAreaNum;
+			int spotToAreaTime = routeCache->TravelTimeToGoalArea( spotAreaNum, areaNum, travelFlags );
+			int areaToSpotTime = routeCache->TravelTimeToGoalArea( areaNum, spotAreaNum, travelFlags );
+			spotsAndAreasTravelTimeTable[rowOffset++] = (uint16_t)std::min( spotToAreaTime, maxVal );
+			spotsAndAreasTravelTimeTable[rowOffset++] = (uint16_t)std::min( areaToSpotTime, maxVal );
 		}
 	}
 }
@@ -488,8 +495,8 @@ TacticalSpotsBuilder::~TacticalSpotsBuilder() {
 	if( spotVisibilityTable ) {
 		G_LevelFree( spotVisibilityTable );
 	}
-	if( spotTravelTimeTable ) {
-		G_LevelFree( spotTravelTimeTable );
+	if( spotsAndAreasTravelTimeTable ) {
+		G_LevelFree( spotsAndAreasTravelTimeTable );
 	}
 }
 
@@ -500,7 +507,7 @@ bool TacticalSpotsBuilder::Build() {
 
 	PickTacticalSpots();
 	ComputeMutualSpotsVisibility();
-	ComputeMutualSpotsReachability();
+	ComputeTravelTimeTable();
 	return true;
 }
 
@@ -884,8 +891,8 @@ void TacticalSpotsBuilder::CopyTo( TacticalSpotsRegistry *registry ) {
 	registry->spotVisibilityTable = this->spotVisibilityTable;
 	this->spotVisibilityTable = nullptr;
 
-	registry->spotTravelTimeTable = this->spotTravelTimeTable;
-	this->spotTravelTimeTable = nullptr;
+	registry->spotsAndAreasTravelTimeTable = this->spotsAndAreasTravelTimeTable;
+	this->spotsAndAreasTravelTimeTable = nullptr;
 
 	registry->needsSavingPrecomputedData = true;
 }
