@@ -10,10 +10,10 @@ int AdvantageProblemSolver::FindMany( vec3_t *spots, int maxSpots ) {
 	SpotsQueryVector &filteredByTablesSpots = FilterByVisTables( spotsFromQuery, insideSpotNum );
 	SpotsAndScoreVector &candidateSpots = SelectCandidateSpots( filteredByTablesSpots );
 	SpotsAndScoreVector &reachCheckedSpots = CheckSpotsReach( candidateSpots, insideSpotNum );
-	SpotsAndScoreVector &visCheckedSpots = CheckOriginVisibility( reachCheckedSpots, maxSpots );
+	SpotsAndScoreVector &enemyCheckedSpots = CheckEnemiesInfluence( reachCheckedSpots );
+	SpotsAndScoreVector &visCheckedSpots = CheckOriginVisibility( enemyCheckedSpots, maxSpots );
 	SortByVisAndOtherFactors( visCheckedSpots );
-	SpotsAndScoreVector &enemyCheckedSpots = CheckEnemiesInfluence( visCheckedSpots );
-	return CleanupAndCopyResults( enemyCheckedSpots, spots, maxSpots );
+	return CleanupAndCopyResults( visCheckedSpots, spots, maxSpots );
 }
 
 SpotsAndScoreVector &AdvantageProblemSolver::SelectCandidateSpots( const SpotsQueryVector &spotsFromQuery ) {

@@ -6,9 +6,9 @@ int CoverProblemSolver::FindMany( vec3_t *spots, int maxSpots ) {
 	const SpotsQueryVector &spotsFromQuery = tacticalSpotsRegistry->FindSpotsInRadius( originParams, &insideSpotNum );
 	SpotsAndScoreVector &candidateSpots = SelectCandidateSpots( spotsFromQuery );
 	SpotsAndScoreVector &reachCheckedSpots = CheckSpotsReach( candidateSpots, insideSpotNum );
-	SpotsAndScoreVector &coverSpots = SelectCoverSpots( reachCheckedSpots, maxSpots );
-	SpotsAndScoreVector &enemyCheckedSpots = CheckEnemiesInfluence( coverSpots );
-	return CleanupAndCopyResults( enemyCheckedSpots, spots, maxSpots );
+	SpotsAndScoreVector &enemyCheckedSpots = CheckEnemiesInfluence( reachCheckedSpots );
+	SpotsAndScoreVector &coverSpots = SelectCoverSpots( enemyCheckedSpots, maxSpots );
+	return CleanupAndCopyResults( coverSpots, spots, maxSpots );
 }
 
 SpotsAndScoreVector &CoverProblemSolver::SelectCoverSpots( const SpotsAndScoreVector &reachCheckedSpots, int maxSpots ) {
