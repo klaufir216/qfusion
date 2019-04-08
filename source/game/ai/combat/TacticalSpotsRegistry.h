@@ -178,8 +178,7 @@ private:
 			this->numSpots = numSpots_;
 		}
 
-		virtual const SpotsQueryVector &FindSpotsInRadius( const OriginParams &originParams,
-														   uint16_t *insideSpotNum ) const;
+		virtual SpotsQueryVector &FindSpotsInRadius( const OriginParams &originParams, uint16_t *insideSpotNum ) const;
 
 		virtual uint16_t *GetCellSpotsList( unsigned gridCellNum, uint16_t *numCellSpots ) const = 0;
 	};
@@ -201,8 +200,7 @@ private:
 		bool Load( class AiPrecomputedFileReader &reader );
 		void Save( class AiPrecomputedFileWriter &writer );
 
-		const SpotsQueryVector &FindSpotsInRadius( const OriginParams &originParams,
-												   uint16_t *insideSpotNum ) const override;
+		SpotsQueryVector &FindSpotsInRadius( const OriginParams &originParams, uint16_t *insideSpotNum ) const override;
 
 		uint16_t *GetCellSpotsList( unsigned gridCellNum, uint16_t *numCellSpots ) const override;
 	};
@@ -255,7 +253,7 @@ private:
 	bool TryLoadPrecomputedData( const char *mapname );
 	void SavePrecomputedData( const char *mapname );
 
-	const SpotsQueryVector &FindSpotsInRadius( const OriginParams &originParams, uint16_t *insideSpotNum ) const {
+	SpotsQueryVector &FindSpotsInRadius( const OriginParams &originParams, uint16_t *insideSpotNum ) const {
 		return spotsGrid.FindSpotsInRadius( originParams, insideSpotNum );
 	}
 public:

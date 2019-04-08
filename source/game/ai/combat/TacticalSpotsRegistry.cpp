@@ -920,8 +920,8 @@ void TacticalSpotsRegistry::BaseSpotsGrid::SetupGridParams() {
 	}
 }
 
-const SpotsQueryVector &TacticalSpotsRegistry::BaseSpotsGrid::FindSpotsInRadius( const OriginParams &originParams,
-																				 uint16_t *insideSpotNum ) const {
+SpotsQueryVector &TacticalSpotsRegistry::BaseSpotsGrid::FindSpotsInRadius( const OriginParams &originParams,
+																		   uint16_t *insideSpotNum ) const {
 
 	vec3_t boxMins, boxMaxs;
 	VectorCopy( originParams.origin, boxMins );
@@ -1002,8 +1002,8 @@ TacticalSpotsRegistry::PrecomputedSpotsGrid::~PrecomputedSpotsGrid() {
 	}
 }
 
-const SpotsQueryVector &TacticalSpotsRegistry::PrecomputedSpotsGrid::FindSpotsInRadius( const OriginParams &originParams,
-																						uint16_t *insideSpotNum ) const {
+SpotsQueryVector &TacticalSpotsRegistry::PrecomputedSpotsGrid::FindSpotsInRadius( const OriginParams &originParams,
+																				  uint16_t *insideSpotNum ) const {
 	if( !IsLoaded() ) {
 		AI_FailWith( "PrecomputedSpotsGrid::FindSpotsInRadius()", "The grid has not been loaded\n" );
 	}
