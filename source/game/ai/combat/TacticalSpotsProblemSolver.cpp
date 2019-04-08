@@ -1,5 +1,6 @@
 #include "TacticalSpotsProblemSolver.h"
 #include "SpotsProblemSolversLocal.h"
+#include "../navigation/AasElementsMask.h"
 #include "../ai_ground_trace_cache.h"
 
 SpotsAndScoreVector &TacticalSpotsProblemSolver::SelectCandidateSpots( const SpotsQueryVector &spotsFromQuery ) {
@@ -188,22 +189,29 @@ SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckSpotsReachFromOriginAndBac
 }
 
 SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckEnemiesInfluence( SpotsAndScoreVector &candidateSpots ) {
-	if( !problemParams.enemiesListHead || problemParams.enemiesInfluence <= 0.0f ) {
+	if( candidateSpots.empty() ) {
+		return candidateSpots;
+	}
+	if( !problemParams.enemiesListHead ) {
+		return candidateSpots;
+	}
+	if( problemParams.enemiesInfluence <= 0.0f ) {
 		return candidateSpots;
 	}
 
 	// Precompute some enemy parameters that are going to be used in an inner loop.
 
 	struct CachedEnemyData {
-		vec3_t origin;
+		const bool *areaVisRow;
+		vec3_t viewOrigin;
 		vec3_t lookDir;
 		vec3_t velocityDir2D;
 		float speed2D;
-		int leafNum;
 		int groundedAreaNum;
 	};
 
-	StaticVector<CachedEnemyData, MAX_INFLUENTIAL_ENEMIES> cachedEnemyData;
+	// Pick at most as many enemies as the number of AAS tmp rows we can allocate
+	StaticVector<CachedEnemyData, AasElementsMask::TMP_ROW_REDUNDANCY_SCALE> cachedEnemyData;
 
 	const auto *aasWorld = AiAasWorld::Instance();
 	const int64_t levelTime = level.time;
@@ -221,9 +229,12 @@ SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckEnemiesInfluence( SpotsAnd
 			continue;
 		}
 
+		bool *const areaVisRow = AasElementsMask::TmpAreasVisRow( (int)cachedEnemyData.size() );
 		CachedEnemyData *const enemyData = cachedEnemyData.unsafe_grow_back();
 
-		enemy->LastSeenOrigin().CopyTo( enemyData->origin );
+		Vec3 enemyOrigin( enemy->LastSeenOrigin() );
+		enemyOrigin.CopyTo( enemyData->viewOrigin );
+		enemyData->viewOrigin[2] += playerbox_stand_viewheight;
 		enemy->LookDir().CopyTo( enemyData->lookDir );
 		enemy->LastSeenVelocity().CopyTo( enemyData->velocityDir2D );
 		enemyData->velocityDir2D[2] = 0;
@@ -234,17 +245,6 @@ SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckEnemiesInfluence( SpotsAnd
 			VectorScale( enemyData->velocityDir2D, scale, enemyData->velocityDir2D );
 		}
 
-		// We can't reuse entity leaf nums since last seen origin is shifted from its actual origin.
-		// TODO: Cache that for every seen enemy state?
-		Vec3 mins( playerbox_stand_mins );
-		Vec3 maxs( playerbox_stand_maxs );
-		mins += enemyData->origin;
-		maxs += enemyData->origin;
-
-		int tmpTopNode;
-		enemyData->leafNum = 0;
-		trap_CM_BoxLeafnums( mins.Data(), maxs.Data(), &enemyData->leafNum, 1, &tmpTopNode );
-
 		if( enemy->ent->ai && enemy->ent->ai->botRef ) {
 			int areaNums[2] = { 0, 0 };
 			enemy->ent->ai->botRef->EntityPhysicsState()->PrepareRoutingStartAreas( areaNums );
@@ -253,44 +253,35 @@ SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckEnemiesInfluence( SpotsAnd
 			enemyData->groundedAreaNum = areaNums[0];
 		} else {
 			vec3_t tmpOrigin;
-			const float *testedOrigin = enemyData->origin;
+			const float *testedOrigin = enemyOrigin.Data();
 			if( AiGroundTraceCache::Instance()->TryDropToFloor( enemy->ent, 64.0f, tmpOrigin ) ) {
 				testedOrigin = tmpOrigin;
 			}
 			enemyData->groundedAreaNum = aasWorld->FindAreaNum( testedOrigin );
 		}
 
-		// Check not more than "threshold" enemies.
-		// This is not correct since the enemies are not sorted starting from the most dangerous one
+		enemyData->areaVisRow = aasWorld->DecompressAreaVis( enemyData->groundedAreaNum, areaVisRow );
+
+		// Interrupt if the capacity is exceeded. This is not really correct
+		// since the enemies are not sorted starting from the most dangerous one
 		// but fits realistic situations well. The gameplay is a mess otherwise anyway.
-		if( cachedEnemyData.size() == problemParams.maxInfluentialEnemies ) {
+		if( cachedEnemyData.size() == cachedEnemyData.capacity() ) {
 			break;
 		}
 	}
 
-	SpotsAndScoreVector &result = tacticalSpotsRegistry->temporariesAllocator.GetNextCleanSpotsAndScoreVector();
+	if( cachedEnemyData.empty() ) {
+		return candidateSpots;
+	}
+
 	const auto *const spots = tacticalSpotsRegistry->spots;
-
-	float spotEnemyVisScore[MAX_ENEMY_INFLUENCE_CHECKED_SPOTS];
-	std::fill_n( spotEnemyVisScore, problemParams.maxCheckedSpots, 0.0f );
-
-	trace_t trace;
-
-	// Check not more than the "threshold" spots starting from best ones
-	for( unsigned i = 0; i < candidateSpots.size(); ++i ) {
-		if( i == problemParams.maxCheckedSpots ) {
-			break;
-		}
-
-		const auto &spotAndScore = candidateSpots[i];
-		const auto &spot = spots[spotAndScore.spotNum];
-		const auto *const areaLeafsList = aasWorld->AreaMapLeafsList( spot.aasAreaNum );
-		// Lets take only the first leaf (if it exists)
-		const int spotLeafNum = *areaLeafsList ? areaLeafsList[1] : 0;
+	for( auto &spotAndScore: candidateSpots ) {
+		const auto &__restrict spot = spots[spotAndScore.spotNum];
 		const int spotFloorClusterNum = aasWorld->AreaFloorClusterNums()[spot.aasAreaNum];
+		float spotVisScore = 0.0f;
 		for( const CachedEnemyData &enemyData: cachedEnemyData ) {
 			Vec3 toSpotDir( spot.origin );
-			toSpotDir -= enemyData.origin;
+			toSpotDir -= enemyData.viewOrigin;
 			float squareDistanceToSpot = toSpotDir.SquaredLength();
 			// Skip far enemies
 			if( squareDistanceToSpot > 1000 * 1000 ) {
@@ -298,7 +289,7 @@ SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckEnemiesInfluence( SpotsAnd
 			}
 			// Skip not very close enemies that are seemingly running away from spot
 			if( squareDistanceToSpot > 384 * 384 ) {
-				toSpotDir *= 1.0f / std::sqrt( squareDistanceToSpot );
+				toSpotDir *= Q_RSqrt( squareDistanceToSpot );
 				if( toSpotDir.Dot( enemyData.lookDir ) < 0 ) {
 					if( enemyData.speed2D >= DEFAULT_PLAYERSPEED ) {
 						if( toSpotDir.Dot( enemyData.velocityDir2D ) < 0 ) {
@@ -308,18 +299,23 @@ SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckEnemiesInfluence( SpotsAnd
 				}
 			}
 
+			// If the spot is very unlikely to be in enemy view
+			// Reasons why it still may be (but we don't care):
+			// 1) A spot can really occupy > 1 area
+			// 2) An enemy can really occupy > 1 area
+			// 3) AAS vis table is built using fairly coarse tests.
+			if( !enemyData.areaVisRow[spot.aasAreaNum] ) {
+				continue;
+			}
+
 			// If the spot and the enemy are in the same floor cluster
 			if( spotFloorClusterNum && spotFloorClusterNum == enemyData.groundedAreaNum ) {
 				if( !aasWorld->IsAreaWalkableInFloorCluster( enemyData.groundedAreaNum, spotFloorClusterNum ) ) {
 					continue;
 				}
 			} else {
-				// If the spot is not even in PVS for the enemy
-				if( !trap_CM_LeafsInPVS( spotLeafNum, enemyData.leafNum ) ) {
-					continue;
-				}
-
-				SolidWorldTrace( &trace, spot.origin, enemyData.origin );
+				trace_t trace;
+				SolidWorldTrace( &trace, enemyData.viewOrigin, spot.origin );
 				if( trace.fraction != 1.0f ) {
 					continue;
 				}
@@ -330,21 +326,18 @@ SpotsAndScoreVector &TacticalSpotsProblemSolver::CheckEnemiesInfluence( SpotsAnd
 			// (e.g. whether it can become very dangerous by picking something).
 			// Even a weak enemy can do a substantial damage since unless we take it into account.
 			// We just select spots that are less visible for other enemies for proper positioning.
-			spotEnemyVisScore[i] += 1.0f;
+			spotVisScore += 1.0f;
 		}
+
 		// We have computed a vis score testing every enemy.
 		// Now modify the original score
-		float enemyInfluenceFactor = 1.0f / std::sqrt( 1.0f + spotEnemyVisScore[i] );
-		float newScore = ApplyFactor( spotAndScore.score, enemyInfluenceFactor, problemParams.enemiesInfluence );
-
-		// We must always have a free room for it since the threshold of tested spots number is very low
-		assert( result.size() < result.capacity() );
-		result.emplace_back( SpotAndScore( spotAndScore.spotNum, newScore ) );
+		const float enemyInfluenceFactor = Q_Rcp( 1.0f + spotVisScore );
+		spotAndScore.score = ApplyFactor( spotAndScore.score, enemyInfluenceFactor, problemParams.enemiesInfluence );
 	}
 
-	std::sort( result.begin(), result.end() );
+	std::sort( candidateSpots.begin(), candidateSpots.end() );
 
-	return result;
+	return candidateSpots;
 }
 
 int TacticalSpotsProblemSolver::CleanupAndCopyResults( const ArrayRange<SpotAndScore> &spotsRange,

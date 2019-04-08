@@ -21,9 +21,7 @@ public:
 	protected:
 		const TrackedEnemy *enemiesListHead { nullptr };
 		const TrackedEnemy *ignoredEnemy { nullptr };
-		float enemiesInfluence { 0.5f };
-		unsigned maxInfluentialEnemies { MAX_INFLUENTIAL_ENEMIES / 2 };
-		unsigned maxCheckedSpots { MAX_ENEMY_INFLUENCE_CHECKED_SPOTS / 2 };
+		float enemiesInfluence { 0.75f };
 		unsigned lastSeenEnemyMillisThreshold { 5000 };
 
 		float minHeightAdvantageOverOrigin { 0.0f };
@@ -68,23 +66,15 @@ public:
 		 * @param listHead_ a list of all tracked enemies of the bot.
 		 * @param ignoredEnemy_ an enemy that should be excluded from obstruction tests (usually a primary enemy)
 		 * @param influence_ an influence of the obstruction/visibility factor on a spot score.
-		 * @param maxInfluentialEnemies_ an actual limit of checked enemies number.
-		 * @param maxCheckedSpots_ an actual limit of checked spots number.
 		 * @param lastSeenMillisThreshold_ enemies last seen earlier are not taken into account.
-		 * @note making specified limits greater than builtin ones has no effect.
-		 * These parameters are for reducing amount of expensive computations depending of an actual problem.
 		 */
 		void TakeEnemiesIntoAccount( const TrackedEnemy *listHead_,
 									 const TrackedEnemy *ignoredEnemy_,
 									 float influence_ = 0.5f,
-									 unsigned maxInfluentialEnemies_ = MAX_INFLUENTIAL_ENEMIES / 2,
-									 unsigned maxCheckedSpots_ = MAX_ENEMY_INFLUENCE_CHECKED_SPOTS / 2,
 									 unsigned lastSeenMillisThreshold_ = 3000u ) {
 			this->enemiesListHead = listHead_;
 			this->ignoredEnemy = ignoredEnemy_;
 			this->enemiesInfluence = Clamp( influence_ );
-			this->maxInfluentialEnemies = (unsigned)Clamp( maxInfluentialEnemies_, 1, MAX_INFLUENTIAL_ENEMIES );
-			this->maxCheckedSpots = (unsigned)Clamp( maxCheckedSpots_, 1, MAX_ENEMY_INFLUENCE_CHECKED_SPOTS );
 			this->lastSeenEnemyMillisThreshold = lastSeenMillisThreshold_;
 		}
 	};
@@ -107,17 +97,6 @@ protected:
 		}
 		return CheckSpotsReachFromOrigin( candidateSpots, insideSpotNum );
 	}
-
-	/**
-	 * A threshold for cutting off further tests to prevent computational explosion.
-	 * A computation should be interrupted once number of tested enemies reaches this threshold.
-	 */
-	static constexpr unsigned MAX_INFLUENTIAL_ENEMIES = 8;
-	/**
-	 * A threshold for cutting off further tests to prevent computational explosion.
-	 * A computation should be interrupted once number of tested enemies reaches this threshold.
-	 */
-	static constexpr unsigned MAX_ENEMY_INFLUENCE_CHECKED_SPOTS = 16;
 
 	virtual SpotsAndScoreVector &CheckEnemiesInfluence( SpotsAndScoreVector &candidateSpots );
 
